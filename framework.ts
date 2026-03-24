@@ -39,29 +39,60 @@ type InferState<TProps extends object> = {} & {
 interface State<TState = any, TEvents extends EventTypes = EventTypes> {
   /** @internal */
   [$events]: TEvents;
-  /** Get the underlying signal for a property. */
+  /** Get the underlying signal for an exposed signal or base-state property. */
   get<K extends keyof TState>(key: K): ReadonlySignal<Immutable<TState[K]>>;
-  /** Access the current state without reactivity. */
+  /** Read the current immutable public state without tracking. */
   peek(): Immutable<TState>;
-  /** Subscribe to state changes. Returns a function to unsubscribe. */
+  /** Subscribe to future immutable state snapshots. Returns a function to unsubscribe. */
   subscribe(listener: (value: Immutable<TState>) => void): () => void;
-  /** Subscribe to an event. Returns a function to unsubscribe. */
+  /**
+   * Subscribe to a custom event emitted by this managed state.
+   *
+   * Your listener receives the emitted argument directly, or no argument at all.
+   * The argument is never wrapped in an array.
+   */
   on<TEvent extends string & keyof TEvents>(
     name: TEvent,
-    listener: (detail: TEvents[TEvent]) => void,
+    listener: (...args: TEvents[TEvent]) => void,
   ): () => void;
 }
 
+/**
+ * Public instance shape produced by `defineManagedState()` and `useManagedState()`.
+ *
+ * Returned signals are exposed as tracked getter properties. Returning the
+ * `StateHandle` itself exposes the base state directly as an immutable property.
+ */
 export type ManagedState<
   TState = any,
   TEvents extends EventTypes = EventTypes,
   TProps extends object = {},
 > = State<TState, TEvents> & Immutable<TState> & TProps;
 
-/** Used by the state constructor to inspect, mutate, and derive state and emit events. */
+/**
+ * Constructor-local access to the base state.
+ *
+ * `TState` may be any non-function value, including primitives. If the base
+ * state is object-shaped, name the handle like an instance such as `counter`.
+ * Otherwise prefer a specific non-generic name instead of `state`, `handle`,
+ * or `value`.
+ *
+ * Return this handle from the constructor only when you want to expose the base
+ * state directly as an immutable property. It is not intended as a composition
+ * primitive between managed states.
+ */
 export type StateHandle<TState, TEvents extends EventTypes = never> = {
+  /** Read the current immutable base state without tracking. */
   get: () => Immutable<TState>;
+  /** Replace the base state, or update it with an Immer producer. */
   set: (value: TState | Producer<TState>) => void;
+  /**
+   * Emit a domain-specific event with zero or one argument.
+   *
+   * Prefer event names that describe meaningful domain happenings. For reactive
+   * responses to state changes, prefer `effect()` from `@preact/signals` over a
+   * generic `"changed"` event.
+   */
   emit: [TEvents] extends [{}]
     ? <TEvent extends string & keyof TEvents>(
         name: TEvent,
@@ -69,10 +100,17 @@ export type StateHandle<TState, TEvents extends EventTypes = never> = {
       ) => void
     : never;
 
-  /** Derive state from the base state. */
+  /** Derive a tracked signal from the base state. */
   select: <U>(selector: (value: Immutable<TState>) => U) => ReadonlySignal<U>;
 };
 
+/**
+ * Pure constructor function for a managed state definition.
+ *
+ * Return only methods, signals, or the provided `StateHandle`. Returned signals
+ * become tracked getter properties, and returning the handle exposes the base
+ * state directly as an immutable property.
+ */
 export type StateConstructor<
   TState,
   TEvents extends EventTypes,
@@ -85,18 +123,27 @@ export type StateConstructor<
   Record<string, StateHandle<any> | ReadonlySignal<any> | (() => any)>;
 
 /**
- * Define an encapsulated state constructor. Nothing outside the constructor can
- * modify the state, except through its returned methods.
+ * Define a managed state class with a private mutable implementation and an
+ * immutable public surface.
  *
- * **Important: The state type MUST NOT be a function.**
+ * `TState` may be any non-function value, including primitives.
  *
- * Methods are automatically wrapped with `action()` (from `@preact/signals`) to
- * ensure they're untracked and batched.
+ * Methods are automatically wrapped with `action()` from `@preact/signals`, so
+ * they are untracked and batched. Public actions should usually close over the
+ * provided handle instead of relying on `this`, which means they typically do
+ * not need defensive binding or wrapping when passed around.
  *
  * The state constructor must return an object with properties that are either:
  * - A function (to expose methods)
  * - A signal (to expose derived state)
- * - The state handle (to expose the base state)
+ * - The state handle (to expose the immutable base state directly)
+ *
+ * Returned signals are turned into getter properties, so reads are tracked by
+ * the `@preact/signals` runtime.
+ *
+ * Use custom events for domain-specific notifications only. Events can carry at
+ * most one argument; use an object literal when you need to send multiple
+ * pieces of data.
  *
  * The state constructor should be side-effect free.
  */
@@ -192,9 +239,15 @@ class StateContainer extends EventTarget {
   subscribe(listener: (value: any) => void) {
     return this._view.subscribe(listener);
   }
-  on(name: string, listener: (detail: any) => void) {
-    const adapter: EventListener = (event: Event) =>
-      listener((event as CustomEvent).detail);
+  on(name: string, listener: (...args: any[]) => void) {
+    const adapter: EventListener = (event: Event) => {
+      const detail = (event as CustomEvent).detail;
+      if (detail === undefined) {
+        listener();
+      } else {
+        listener(detail);
+      }
+    };
     this.addEventListener(name, adapter);
     return () => {
       this.removeEventListener(name, adapter);
@@ -209,9 +262,10 @@ function isProducer<T>(value: T | Producer<T>): value is Producer<T> {
 /**
  * Clean encapsulation of complex UI state.
  *
- * Use this when your component's local state is complex (more than a simple primitive value, or
- * more than a few state transitions). Don't use this if a single `useState()` is enough. Don't use
- * this for local state that is unrelated to each other conceptually.
+ * Use this when a component needs the same managed-state API without defining a
+ * separate class. The constructor follows the same rules as
+ * `defineManagedState()`: return only methods, signals, or the `StateHandle`,
+ * and keep it side-effect free.
  */
 export function useManagedState<
   TState,
@@ -227,12 +281,18 @@ export function useManagedState<
   )[0];
 }
 
+/**
+ * Any subscribable source, including a managed state or any Preact signal.
+ */
 export type SubscribeTarget<T> = {
   subscribe: (listener: (value: T) => void) => () => void;
 };
 
 /**
- * Subscribe to future changes from a signal or state manager.
+ * Subscribe to future values from a subscribable source inside `useEffect`.
+ *
+ * The listener is kept fresh automatically, so a dependency array is not part
+ * of this API. Pass `null` to disable the subscription temporarily.
  */
 export function useSubscribe<T>(
   target: SubscribeTarget<T> | null,
@@ -265,7 +325,13 @@ type InferEventListener<
       : (event: Event) => void;
 
 /**
- * Subscribe to events from an event target or state manager.
+ * Subscribe to events from an `EventTarget` or managed state inside `useEffect`.
+ *
+ * The listener is kept fresh automatically, so a dependency array is not part
+ * of this API. Pass `null` to disable the subscription temporarily.
+ *
+ * For managed-state events, your listener receives the emitted argument
+ * directly, or no argument at all, never an array wrapper.
  */
 export function useEventTarget<
   T extends EventTarget | State,
@@ -295,6 +361,7 @@ function useStableCallback<TParams extends any[], TResult>(
   return useCallback((...params: TParams) => (0, ref.current)(...params), []);
 }
 
+/** Check whether a value is a managed-state instance. */
 export function isManagedState(value: unknown): value is State {
   return value instanceof StateContainer;
 }

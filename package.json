@@ -12,7 +12,8 @@
   "license": "ISC",
   "devDependencies": {
     "tsdown": "^0.21.4",
-    "tsx": "^4.21.0"
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2"
   },
   "dependencies": {
     "@preact/signals": "^2.8.2",
