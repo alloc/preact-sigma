@@ -1,25 +1,24 @@
 # `framework`
 
-Type-first utilities for managing complex UI state with Preact Signals and Immer.
+Utilities for building managed UI state on top of `@preact/signals` and `immer`.
 
-This README is based only on [`dist/framework.d.mts`](/Users/alec/dev/sandbox/immer-test/dist/framework.d.mts), so a few usage details are inferred from the public types and doc comments.
+This README is derived only from [`dist/framework.d.mts`](/Users/alec/dev/sandbox/immer-test/dist/framework.d.mts).
 
-## What It Provides
+## Overview
 
-The module exports a small state-management layer built around:
+This module gives you a pattern for defining state with:
 
-- `@preact/signals` for reactivity
-- `immer` for immutable updates
-- event-style subscriptions for state-local notifications
+- a private mutable implementation
+- an immutable public surface
+- tracked derived values via Preact Signals
+- public methods for state transitions
+- optional domain-specific custom events
 
-The main idea is:
-
-1. Define a piece of managed state from an initial value.
-2. Inside the constructor, use a `StateHandle` to read, update, derive, and emit events.
-3. Return methods and derived signals.
-4. Consume the resulting object as immutable state plus public actions.
+The public API is centered on `defineManagedState()` and `useManagedState()`.
 
 ## Exports
+
+Runtime exports:
 
 - `defineManagedState`
 - `useManagedState`
@@ -36,222 +35,273 @@ Type exports:
 - `StateHandle`
 - `SubscribeTarget`
 
-## Core Concepts
+## Core Types
 
-### `State`
+### `State<TState, TEvents>`
 
-`State<TState, TEvents>` is the base reactive interface.
-
-It provides:
-
-- `get(key)` to access a property as a readonly signal
-- `peek()` to read the current immutable state without tracking
-- `subscribe(listener)` to listen for state changes
-- `on(name, listener)` to listen for named events emitted by the state manager
-
-### `StateHandle`
-
-`StateHandle<TState, TEvents>` is the private control surface passed into a state constructor.
+Base reactive interface shared by managed-state instances.
 
 It provides:
 
-- `get()` to read the current immutable state
-- `set(value)` to replace state or update it with an Immer producer
-- `emit(name, ...args)` to dispatch typed events
-- `select(selector)` to derive readonly signals from state
+- `get(key)` to access the underlying signal for an exposed state property
+- `peek()` to read the current immutable public state without tracking
+- `subscribe(listener)` to receive future immutable state snapshots
+- `on(name, listener)` to listen for custom managed-state events
 
-`set()` accepts either:
+Important event detail:
 
-- a full next-state value
-- an Immer `Producer<TState>`
+- listeners receive the emitted argument directly, or no argument at all
+- event payloads are never wrapped in an array at runtime
 
-That means updates like "mutate a draft" are expected to work.
+### `ManagedState<TState, TEvents, TProps>`
 
-### `ManagedState`
+Public instance shape returned by `defineManagedState()` and `useManagedState()`.
 
-`ManagedState<TState, TEvents, TProps>` combines:
+It combines:
 
-- the base `State` API
-- the immutable state shape itself
-- public methods returned from the constructor
+- the `State` API
+- the immutable public state
+- public action methods returned from the constructor
 
-Signals returned from the constructor are exposed as unwrapped values in the public type, not as signal objects. Functions returned from the constructor become the public action surface.
+Returned signals are exposed as tracked getter properties. If the constructor returns the provided `StateHandle`, that property exposes the base state directly as an immutable value.
 
-## `defineManagedState`
+### `StateHandle<TState, TEvents>`
+
+Constructor-local access to the private base state.
+
+It provides:
+
+- `get()` to read the current immutable base state without tracking
+- `set(value)` to replace the base state or update it with an Immer producer
+- `select(selector)` to derive a tracked signal from base state
+- `emit(name, arg?)` to emit a domain-specific event with zero or one argument
+
+`TState` may be any non-function value, including primitives.
+
+The declaration comments make one intent explicit: return the handle only when you want to expose the base state directly as public immutable data. It is not intended as a composition primitive between managed states.
+
+## `defineManagedState()`
 
 ```ts
 defineManagedState(constructor, initialState)
 ```
 
-Defines a reusable managed-state class.
+Defines a managed-state class.
 
-The constructor receives:
+The constructor:
 
-- `handle: StateHandle<TState, TEvents>`
-- any additional constructor parameters you define
+- receives a `StateHandle`
+- may also receive custom constructor parameters
+- must be side-effect free
+- must return only methods, readonly signals, or the provided `StateHandle`
 
-It should return an object containing only:
+Methods returned from the constructor are automatically wrapped with `action()` from `@preact/signals`, so they are batched and untracked. In practice, actions should usually close over the provided handle instead of relying on `this`.
 
-- functions for public methods
-- readonly signals for derived values
-- state handles for internal composition
+Returned signals are converted into getter properties, so reading them participates in Signals tracking.
 
-Based on the declaration comments:
-
-- state should not itself be a function
-- constructor logic should be side-effect free
-- returned methods are automatically wrapped so calls are batched and untracked
-
-### Inferred Example
+### Example
 
 ```ts
 import { defineManagedState } from "framework";
 
 type CounterEvents = {
-  changed: [nextValue: number];
+  thresholdReached: [{ count: number }];
 };
 
-const CounterState = defineManagedState(
-  (state, step = 1) => {
-    const count = state.select((value) => value.count);
+const Counter = defineManagedState(
+  (counter, step: number) => {
+    const doubled = counter.select((count) => count * 2);
 
     return {
-      count,
+      count: counter,
+      doubled,
       increment() {
-        state.set((draft) => {
-          draft.count += step;
-        });
+        counter.set((value) => value + step);
 
-        state.emit("changed", state.get().count);
+        if (counter.get() >= 10) {
+          counter.emit("thresholdReached", { count: counter.get() });
+        }
       },
       reset() {
-        state.set({ count: 0 });
-        state.emit("changed", 0);
+        counter.set(0);
       },
     };
   },
-  { count: 0 }
+  0
 );
 
-const counter = new CounterState(2);
+const state = new Counter(2);
 
-counter.count;
-counter.increment();
-counter.reset();
-counter.subscribe((value) => {
-  console.log(value.count);
-});
-counter.on("changed", ([nextValue]) => {
-  console.log(nextValue);
+state.count;
+state.doubled;
+state.increment();
+
+state.on("thresholdReached", (event) => {
+  console.log(event.count);
 });
 ```
 
-## `useManagedState`
+In this example:
+
+- the base state is a primitive number
+- `count` is exposed by returning the `StateHandle`
+- `doubled` is exposed by returning a derived signal
+- `increment()` and `reset()` are public actions
+
+## `useManagedState()`
 
 ```ts
 useManagedState(constructor, initialState)
 ```
 
-Hook form of `defineManagedState` for component-local state.
+Hook form of the same pattern for component-local state, without defining a separate class.
 
-Use it when state transitions are substantial enough that plain `useState()` would become awkward. The declaration comments explicitly position it for complex local UI state, not trivial single-value state.
+The constructor rules are the same as `defineManagedState()`:
 
-### Inferred Example
+- return only methods, signals, or the `StateHandle`
+- keep the constructor side-effect free
 
-```ts
+### Example
+
+```tsx
 import { useManagedState } from "framework";
 
-function Counter() {
-  const counter = useManagedState((state) => {
-    const count = state.select((value) => value.count);
+function SearchBox() {
+  const search = useManagedState((state) => {
+    const query = state.select((value) => value.query);
+    const hasQuery = state.select((value) => value.query.length > 0);
 
     return {
-      count,
-      increment() {
+      query,
+      hasQuery,
+      setQuery(next: string) {
         state.set((draft) => {
-          draft.count += 1;
+          draft.query = next;
+        });
+      },
+      clear() {
+        state.set((draft) => {
+          draft.query = "";
         });
       },
     };
-  }, { count: 0 });
+  }, { query: "" });
 
-  return <button onClick={() => counter.increment()}>{counter.count}</button>;
+  return (
+    <div>
+      <input
+        value={search.query}
+        onInput={(event) => search.setQuery(event.currentTarget.value)}
+      />
+      {search.hasQuery && <button onClick={() => search.clear()}>Clear</button>}
+    </div>
+  );
 }
 ```
 
-## `useSubscribe`
+## Events
+
+Managed-state events are for domain-specific notifications, not generic change tracking.
+
+The declarations explicitly recommend:
+
+- use events for meaningful domain happenings
+- prefer `effect()` from `@preact/signals` for reactive responses to state changes
+- use an object literal when you need to send multiple pieces of data
+
+Event types are defined as a map from event name to a tuple with zero or one item:
+
+```ts
+type TodoEvents = {
+  saved: [];
+  selected: [{ id: string }];
+};
+```
+
+Examples:
+
+```ts
+todo.emit("saved");
+todo.emit("selected", { id: "a1" });
+
+state.on("saved", () => {});
+state.on("selected", (event) => {
+  console.log(event.id);
+});
+```
+
+## `useSubscribe()`
 
 ```ts
 useSubscribe(target, listener)
 ```
 
-Subscribes to future updates from any object with a compatible `subscribe(listener)` method. This includes managed state and can include other subscribable objects that match the `SubscribeTarget<T>` type.
+Subscribes to future values from any subscribable source inside `useEffect`.
 
-## `useEventTarget`
+The target can be:
+
+- a managed state
+- a Preact signal
+- any object with `subscribe(listener): () => void`
+
+Behavior documented in the declarations:
+
+- the listener is kept fresh automatically
+- there is no dependency-array parameter
+- pass `null` to disable the subscription temporarily
+
+## `useEventTarget()`
 
 ```ts
 useEventTarget(target, name, listener)
 ```
 
-Subscribes to events from either:
+Subscribes inside `useEffect` to either:
 
 - a DOM-style `EventTarget`
-- a managed state object
+- a managed state
 
-For managed state, event names and listener arguments are inferred from the state's event map.
+Behavior documented in the declarations:
 
-## `isManagedState`
+- the listener is kept fresh automatically
+- there is no dependency-array parameter
+- pass `null` to disable the subscription temporarily
+
+For managed-state events, the listener receives the emitted argument directly, or no argument at all.
+
+## `isManagedState()`
 
 ```ts
 isManagedState(value)
 ```
 
-Runtime type guard for detecting whether a value is one of these managed state objects.
+Runtime type guard that checks whether a value is a managed-state instance.
 
 ## `batch` and `untracked`
 
-These are re-exported directly from `@preact/signals`.
+These are re-exported from `@preact/signals`.
 
-They are useful when coordinating multiple updates or reading reactive values without creating subscriptions.
+Use them when you need the underlying Signals primitives directly.
 
-## Event Typing
+## When To Use This
 
-Events are defined as a map from event name to tuple arguments:
+Use this pattern when you want:
 
-```ts
-type TodoEvents = {
-  added: [id: string];
-  removed: [id: string, hardDelete?: boolean];
-};
-```
+- complex local or reusable UI state behind a constrained API
+- immutable updates with Immer
+- tracked derived values
+- public actions that express state transitions clearly
+- optional domain events for discrete business-level notifications
 
-That shape is used by:
+Skip it when plain `useState()` is enough.
 
-- `handle.emit("added", id)`
-- `state.on("added", listener)`
-- `useEventTarget(state, "added", listener)`
+## Design Rules From The Declarations
 
-Listeners for managed-state events receive the tuple contents as arguments.
+If you are writing managed state with this module, the declarations strongly imply these rules:
 
-## Mental Model
-
-Use this library when you want:
-
-- immutable state updates
-- derived reactive values
-- a constrained public action API
-- typed local events
-- a cleaner alternative to scattering complex component state across many hooks
-
-Avoid it when a single primitive or a couple of straightforward `useState()` calls already solve the problem.
-
-## Assumptions And Limits
-
-Because this documentation was written from declaration files only, these points are inferred rather than confirmed by implementation:
-
-- how derived signals are materialized at runtime on the returned object
-- whether nested `StateHandle`s are intended mainly for composition or also for public exposure
-- exact subscription timing and cleanup semantics inside the React hooks
-- package name and import path used in published builds
-
-If you want stricter documentation later, the next step would be to compare this README against the runtime implementation and real usage examples.
+- base state can be any non-function value, including primitives
+- constructors should be pure and side-effect free
+- return only methods, signals, or the provided `StateHandle`
+- use the `StateHandle` to expose base state, not to compose managed states together
+- prefer actions that close over the handle instead of using `this`
+- use custom events sparingly and only for domain-level notifications
