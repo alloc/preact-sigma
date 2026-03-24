@@ -1,0 +1,58 @@
+# `preact-sigma` Best Practices
+
+## Let The Constructor Drive Inference
+
+Always explicitly type the first parameter of a `defineManagedState()` or `useManagedState()` constructor as `StateHandle<...>`.
+
+When the managed state emits events, prefer declaring a separate event type alias named `${ClassName}Events` instead of writing the event map inline inside the `StateHandle` type argument.
+
+When AI agents are generating code, also prefer declaring a `${ClassName}State` type alias before the event type alias, even if the state type is simple.
+
+```ts
+type CounterState = number;
+
+type CounterEvents = {
+  thresholdReached: [{ count: number }];
+};
+
+const Counter = defineManagedState(
+  (count: StateHandle<CounterState, CounterEvents>) => ({
+    count,
+  }),
+  0,
+);
+```
+
+This is how the library infers the internal state and event types. Avoid specifying explicit type parameters on `defineManagedState()` or `useManagedState()` when the constructor parameter can express the same information more locally and clearly.
+
+The extra `${ClassName}State` alias is mainly an AI-facing convention. It gives code generators the state name before they choose the handle identifier, which makes it easier for them to follow the handle naming guideline consistently.
+
+## Name The Handle Precisely
+
+When the base state is object-shaped, name the handle like an instance of the state model, such as `counter`, `search`, or `dialog`.
+
+When the base state is not an object, avoid generic names like `state`, `handle`, or `value`. A more specific name usually makes actions and selectors easier to read.
+
+## Keep Public Actions Domain-Specific
+
+Public actions should represent meaningful domain actions, not low-level mutations.
+
+Prefer names like `save()`, `submit()`, `open()`, `close()`, or `rename()` over surgical methods like `setUpdatedAt()`. Low-level actions usually indicate that internal concerns are leaking into the public API.
+
+## Avoid Unnecessary Binding
+
+Managed state constructors and public actions do not use a `this` context. They work through closure over the typed `StateHandle`.
+
+That usually means extra binding or wrapper callbacks are unnecessary when passing public actions around.
+
+## Keep Events Domain-Specific
+
+Custom events should describe meaningful domain happenings, not generic change notifications.
+
+Avoid events like `"changed"` or `"updated"` when a caller really wants to react to state changes. In those cases, use `effect()` from `@preact/signals` against reactive state instead.
+
+Custom events can carry at most one argument. When an event needs multiple pieces of data, use a single object payload.
+
+```ts
+todo.emit("selected", { id, source });
+```

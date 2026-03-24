@@ -49,7 +49,6 @@ interface State<TState = any, TEvents extends EventTypes = EventTypes> {
    * Subscribe to a custom event emitted by this managed state.
    *
    * Your listener receives the emitted argument directly, or no argument at all.
-   * The argument is never wrapped in an array.
    */
   on<TEvent extends string & keyof TEvents>(
     name: TEvent,
@@ -61,7 +60,8 @@ interface State<TState = any, TEvents extends EventTypes = EventTypes> {
  * Public instance shape produced by `defineManagedState()` and `useManagedState()`.
  *
  * Returned signals are exposed as tracked getter properties. Returning the
- * `StateHandle` itself exposes the base state directly as an immutable property.
+ * `StateHandle` itself exposes the base state directly as a reactive immutable
+ * property.
  */
 export type ManagedState<
   TState = any,
@@ -72,14 +72,10 @@ export type ManagedState<
 /**
  * Constructor-local access to the base state.
  *
- * `TState` may be any non-function value, including primitives. If the base
- * state is object-shaped, name the handle like an instance such as `counter`.
- * Otherwise prefer a specific non-generic name instead of `state`, `handle`,
- * or `value`.
+ * `TState` may be any non-function value, including primitives.
  *
- * Return this handle from the constructor only when you want to expose the base
- * state directly as an immutable property. It is not intended as a composition
- * primitive between managed states.
+ * Return this handle from the constructor when you want to expose the base
+ * state directly as a reactive immutable property on the managed state.
  */
 export type StateHandle<TState, TEvents extends EventTypes = never> = {
   /** Read the current immutable base state without tracking. */
@@ -87,11 +83,7 @@ export type StateHandle<TState, TEvents extends EventTypes = never> = {
   /** Replace the base state, or update it with an Immer producer. */
   set: (value: TState | Producer<TState>) => void;
   /**
-   * Emit a domain-specific event with zero or one argument.
-   *
-   * Prefer event names that describe meaningful domain happenings. For reactive
-   * responses to state changes, prefer `effect()` from `@preact/signals` over a
-   * generic `"changed"` event.
+   * Emit a custom event with zero or one argument.
    */
   emit: [TEvents] extends [{}]
     ? <TEvent extends string & keyof TEvents>(
@@ -100,16 +92,24 @@ export type StateHandle<TState, TEvents extends EventTypes = never> = {
       ) => void
     : never;
 
-  /** Derive a tracked signal from the base state. */
+  /**
+   * Derive a tracked signal from the base state.
+   *
+   * This is especially useful when the base state is object-shaped and you want
+   * to expose deeply nested values without exposing the whole object.
+   */
   select: <U>(selector: (value: Immutable<TState>) => U) => ReadonlySignal<U>;
 };
 
 /**
  * Pure constructor function for a managed state definition.
  *
+ * The first parameter should be explicitly typed as `StateHandle<...>`. The
+ * library infers the internal state and event types from that parameter type.
+ *
  * Return only methods, signals, or the provided `StateHandle`. Returned signals
  * become tracked getter properties, and returning the handle exposes the base
- * state directly as an immutable property.
+ * state directly as a reactive immutable property.
  */
 export type StateConstructor<
   TState,
@@ -128,22 +128,21 @@ export type StateConstructor<
  *
  * `TState` may be any non-function value, including primitives.
  *
+ * The constructor function's explicitly typed `StateHandle` parameter is what
+ * the library uses to infer the internal state and event types.
+ *
  * Methods are automatically wrapped with `action()` from `@preact/signals`, so
- * they are untracked and batched. Public actions should usually close over the
- * provided handle instead of relying on `this`, which means they typically do
- * not need defensive binding or wrapping when passed around.
+ * they are untracked and batched.
  *
  * The state constructor must return an object with properties that are either:
  * - A function (to expose methods)
  * - A signal (to expose derived state)
- * - The state handle (to expose the immutable base state directly)
+ * - The state handle (to expose the reactive immutable base state directly)
  *
  * Returned signals are turned into getter properties, so reads are tracked by
  * the `@preact/signals` runtime.
  *
- * Use custom events for domain-specific notifications only. Events can carry at
- * most one argument; use an object literal when you need to send multiple
- * pieces of data.
+ * Events can carry at most one argument.
  *
  * The state constructor should be side-effect free.
  */
@@ -264,8 +263,8 @@ function isProducer<T>(value: T | Producer<T>): value is Producer<T> {
  *
  * Use this when a component needs the same managed-state API without defining a
  * separate class. The constructor follows the same rules as
- * `defineManagedState()`: return only methods, signals, or the `StateHandle`,
- * and keep it side-effect free.
+ * `defineManagedState()`, including explicit typing of the `StateHandle`
+ * parameter for state and event inference.
  */
 export function useManagedState<
   TState,
@@ -331,7 +330,7 @@ type InferEventListener<
  * of this API. Pass `null` to disable the subscription temporarily.
  *
  * For managed-state events, your listener receives the emitted argument
- * directly, or no argument at all, never an array wrapper.
+ * directly, or no argument at all.
  */
 export function useEventTarget<
   T extends EventTarget | State,
@@ -343,12 +342,11 @@ export function useEventTarget<
 ): void {
   listener = useStableCallback(listener) as typeof listener;
   useEffect(() => {
-    if (!target) return;
-    if (isManagedState(target)) {
-      return target.on(name, listener as any);
+    // Managed state is secretly an EventTarget, so this is safe.
+    if (target instanceof EventTarget) {
+      target.addEventListener(name, listener);
+      return () => target.removeEventListener(name, listener);
     }
-    target.addEventListener(name, listener);
-    return () => target.removeEventListener(name, listener);
   }, [target, name]);
 }
 
