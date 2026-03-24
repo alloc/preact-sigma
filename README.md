@@ -2,19 +2,21 @@
 
 Managed UI state for Preact Signals, with Immer-powered updates and a small public API.
 
+For guidance on naming, inference, and API design conventions, see [`best_practices.md`](/Users/alec/dev/sandbox/immer-test/best_practices.md).
+
 ## Big Picture
 
-Define state once, return a few actions and derived values, and consume the result as plain immutable data.
+Define state once, return a few actions and derived values, and consume the result as reactive immutable data.
 
 ```ts
-import { defineManagedState } from "preact-sigma";
+import { defineManagedState, type StateHandle } from "preact-sigma";
 
 type CounterEvents = {
   thresholdReached: [{ count: number }];
 };
 
 const Counter = defineManagedState(
-  (counter, step: number) => {
+  (counter: StateHandle<number, CounterEvents>, step: number) => {
     const doubled = counter.select((count) => count * 2);
 
     return {
@@ -51,10 +53,10 @@ state.on("thresholdReached", (event) => {
 Use `defineManagedState()` when you want a reusable managed-state class.
 
 ```ts
-import { defineManagedState } from "preact-sigma";
+import { defineManagedState, type StateHandle } from "preact-sigma";
 
 const Counter = defineManagedState(
-  (counter) => ({
+  (counter: StateHandle<number>) => ({
     count: counter,
     increment() {
       counter.set((value) => value + 1);
@@ -66,11 +68,13 @@ const Counter = defineManagedState(
 
 ## Expose Base State
 
-Return the first constructor argument when you want the base state to appear as a public immutable property.
+Return the first constructor argument when you want the base state to appear as a reactive immutable property.
 
 ```ts
+import { defineManagedState, type StateHandle } from "preact-sigma";
+
 const Counter = defineManagedState(
-  (count) => ({
+  (count: StateHandle<number>) => ({
     count,
   }),
   0
@@ -84,8 +88,10 @@ new Counter().count;
 Use `.select()` to derive tracked values, then return them to expose them as getter properties.
 
 ```ts
+import { defineManagedState, type StateHandle } from "preact-sigma";
+
 const Counter = defineManagedState(
-  (count) => ({
+  (count: StateHandle<number>) => ({
     doubled: count.select((count) => count * 2),
   }),
   0
@@ -94,13 +100,15 @@ const Counter = defineManagedState(
 new Counter().doubled;
 ```
 
-## Update With Immer
+## Update State
 
 Pass an Immer producer to `.set()` when your base state is object-shaped.
 
 ```ts
+import { defineManagedState, type StateHandle } from "preact-sigma";
+
 const Search = defineManagedState(
-  (search) => ({
+  (search: StateHandle<{ query: string }>) => ({
     setQuery(query: string) {
       search.set((draft) => {
         draft.query = query;
@@ -111,36 +119,18 @@ const Search = defineManagedState(
 );
 ```
 
-## Use Methods As Actions
-
-Returned methods are the public way to change state.
+## Emit Events
 
 ```ts
-const Counter = defineManagedState(
-  (counter) => ({
-    increment() {
-      counter.set((value) => value + 1);
-    },
-    reset() {
-      counter.set(0);
-    },
-  }),
-  0
-);
-```
+import { defineManagedState, type StateHandle } from "preact-sigma";
 
-## Emit Domain Events
-
-Use `.emit()` for meaningful domain events, not generic "state changed" notifications.
-
-```ts
 type TodoEvents = {
   saved: [];
   selected: [{ id: string }];
 };
 
-const Todo = defineManagedState<any, TodoEvents>(
-  (todo) => ({
+const Todo = defineManagedState(
+  (todo: StateHandle<{}, TodoEvents>) => ({
     save() {
       todo.emit("saved");
     },
@@ -206,11 +196,11 @@ const unsubscribe = counter.subscribe((value) => {
 Use `useManagedState()` when you want the same pattern directly inside a component.
 
 ```tsx
-import { useManagedState } from "preact-sigma";
+import { useManagedState, type StateHandle } from "preact-sigma";
 
 function SearchBox() {
   const search = useManagedState(
-    (state) => ({
+    (state: StateHandle<{ query: string }>) => ({
       query: state.select((value) => value.query),
       setQuery(query: string) {
         state.set((draft) => {
@@ -277,13 +267,15 @@ untracked(() => {
 });
 ```
 
-## When To Use It
+## Small Feature Model
 
-Reach for `preact-sigma` when a component or UI feature needs a small state model with clear actions and derived values.
+This pattern works well when a component or UI feature needs a small state model with a few public methods and derived values.
 
 ```ts
+import { defineManagedState, type StateHandle } from "preact-sigma";
+
 const Dialog = defineManagedState(
-  (dialog) => ({
+  (dialog: StateHandle<boolean>) => ({
     open: dialog,
     show() {
       dialog.set(true);
