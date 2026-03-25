@@ -140,12 +140,16 @@ export function query<TFunction extends (...args: any[]) => any>(
  * state.
  *
  * Lenses only exist on `StateHandle`, and `get()` reads are tracked in the
- * same way as `StateHandle.get()`.
+ * same way as `StateHandle.get()`. `set()` accepts either a replacement value
+ * or an Immer producer for that property value.
  */
 export type Lens<TState = any> = {
   /** Read the current immutable property value. This read is tracked. */
   get: () => Immutable<TState>;
-  /** Replace the property value, or update it with an Immer producer. */
+  /**
+   * Replace the property value, or update it with an Immer producer for that
+   * property value.
+   */
   set: (value: TState | Producer<TState>) => void;
 };
 
@@ -158,7 +162,9 @@ export type Lens<TState = any> = {
  * state directly as a reactive immutable property on the managed state.
  *
  * When the base state is object-shaped, the handle also exposes a shallow
- * `Lens` for each top-level property key.
+ * `Lens` for each top-level property key. Spreading an object-shaped handle
+ * into the returned constructor object exposes those top-level lenses as
+ * tracked public properties.
  *
  * For ordinary derived values, prefer external functions like
  * `getVisibleTodos(state)` so unused helpers can be tree-shaken. Reach for
@@ -220,7 +226,9 @@ export type StateConstructor<
  * - A managed state instance (to compose another managed state as a property)
  *
  * Returned signals and top-level lenses are turned into getter properties, so
- * reads are tracked by the `@preact/signals` runtime.
+ * reads are tracked by the `@preact/signals` runtime. When the base state is
+ * object-shaped, spreading the `StateHandle` into the returned object exposes
+ * its current top-level lenses at once.
  *
  * Events can carry at most one argument.
  *
