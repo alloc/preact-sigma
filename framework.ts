@@ -4,13 +4,12 @@ import {
   ReadonlySignal,
   Signal,
   signal,
-  untracked,
 } from "@preact/signals";
 import { castImmutable, freeze, Immutable, produce, Producer } from "immer";
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 
 // Don't re-export the entire API; only the most essential parts.
-export { untracked, batch } from "@preact/signals";
+export { batch, computed, untracked } from "@preact/signals";
 
 const $events = Symbol("events");
 
@@ -24,7 +23,7 @@ type FilterProperties<T extends object, U> = {} & {
 
 type InferActions<TProps extends object> = {} & FilterProperties<
   TProps,
-  () => any
+  (...args: any[]) => any
 >;
 
 type InferState<TProps extends object> = {} & {
@@ -76,6 +75,11 @@ export type ManagedState<
  *
  * Return this handle from the constructor when you want to expose the base
  * state directly as a reactive immutable property on the managed state.
+ *
+ * For ordinary derived values, prefer external functions like
+ * `getVisibleTodos(state)` so unused helpers can be tree-shaken. Reach for
+ * `computed(() => derive(handle.get()))` only when you need memoized reactive
+ * reads as a performance optimization.
  */
 export type StateHandle<TState, TEvents extends EventTypes = never> = {
   /** Read the current immutable base state without tracking. */
@@ -91,14 +95,6 @@ export type StateHandle<TState, TEvents extends EventTypes = never> = {
         ...args: TEvents[TEvent]
       ) => void
     : never;
-
-  /**
-   * Derive a tracked signal from the base state.
-   *
-   * This is especially useful when the base state is object-shaped and you want
-   * to expose deeply nested values without exposing the whole object.
-   */
-  select: <U>(selector: (value: Immutable<TState>) => U) => ReadonlySignal<U>;
 };
 
 /**
@@ -120,7 +116,7 @@ export type StateConstructor<
   handle: StateHandle<TState, TEvents>,
   ...params: TParams
 ) => TProps &
-  Record<string, StateHandle<any> | ReadonlySignal<any> | (() => any)>;
+  Record<string, StateHandle<any> | ReadonlySignal<any> | ((...args: any[]) => any)>;
 
 /**
  * Define a managed state class with a private mutable implementation and an
@@ -273,11 +269,19 @@ export function useManagedState<
   TInitialState = TState,
 >(
   constructor: StateConstructor<TState, TEvents, [], TProps>,
-  initialState: TInitialState,
+  initialState: TInitialState | (() => TInitialState),
 ): ManagedState<InferState<TProps>, TEvents, InferActions<TProps>> {
   return useState(
-    () => new (defineManagedState(constructor, initialState))(),
+    () =>
+      new (defineManagedState(
+        constructor,
+        isFunction(initialState) ? initialState() : initialState,
+      ))(),
   )[0];
+}
+
+function isFunction(value: unknown): value is () => any {
+  return typeof value === "function";
 }
 
 /**

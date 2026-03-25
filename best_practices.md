@@ -31,7 +31,27 @@ The extra `${ClassName}State` alias is mainly an AI-facing convention. It gives 
 
 When the base state is object-shaped, name the handle like an instance of the state model, such as `counter`, `search`, or `dialog`.
 
-When the base state is not an object, avoid generic names like `state`, `handle`, or `value`. A more specific name usually makes actions and selectors easier to read.
+When the base state is not an object, avoid generic names like `state`, `handle`, or `value`. A more specific name usually makes actions and derivations easier to read.
+
+## Keep Derivations Tree-Shakeable
+
+For ordinary derived values, prefer external functions over properties on the managed state.
+
+That keeps the state model focused on mutable domain behavior and lets unused derivation helpers drop out of the bundle.
+
+```ts
+function getDoubledCount(count: number) {
+  return count * 2;
+}
+
+getDoubledCount(counter.count);
+```
+
+Use `computed()` only when you specifically need a memoized reactive value for performance, such as an expensive filtered list or a value the view reads many times.
+
+```ts
+const visibleTodos = computed(() => getVisibleTodos(todoList.get()));
+```
 
 ## Keep Public Actions Domain-Specific
 

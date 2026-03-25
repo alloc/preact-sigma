@@ -1,5 +1,6 @@
 import { useEffect, useState } from "preact/hooks";
 import {
+  computed,
   type StateHandle,
   useEventTarget,
   useManagedState,
@@ -27,6 +28,7 @@ type TodoEvents = {
 };
 
 type TodoListHandle = StateHandle<TodoListState, TodoEvents>;
+type TodoListSnapshot = ReturnType<TodoListHandle["get"]>;
 
 const STORAGE_KEY = "preact-sigma.todo-list";
 
@@ -47,41 +49,43 @@ const FALLBACK_STATE: TodoListState = {
 };
 
 function createInitialState(): TodoListState {
-  if (typeof window === "undefined") {
-    return FALLBACK_STATE;
-  }
-
   const saved = window.localStorage.getItem(STORAGE_KEY);
   if (!saved) {
     return FALLBACK_STATE;
   }
-
-  try {
-    const parsed = JSON.parse(saved) as Partial<TodoListState>;
-    return {
-      draft: typeof parsed.draft === "string" ? parsed.draft : "",
-      filter:
-        parsed.filter === "active" || parsed.filter === "done"
-          ? parsed.filter
-          : "all",
-      todos: Array.isArray(parsed.todos)
-        ? parsed.todos.filter(isTodo)
-        : FALLBACK_STATE.todos,
-    };
-  } catch {
-    return FALLBACK_STATE;
-  }
-}
-
-function isTodo(value: unknown): value is Todo {
-  return !!value && typeof value === "object"
-    && typeof (value as Todo).id === "string"
-    && typeof (value as Todo).title === "string"
-    && typeof (value as Todo).done === "boolean";
+  return JSON.parse(saved) as TodoListState;
 }
 
 function nextTodoId() {
   return globalThis.crypto?.randomUUID?.() ?? `todo-${Date.now()}`;
+}
+
+function getVisibleTodos(state: TodoListSnapshot) {
+  if (state.filter === "active") {
+    return state.todos.filter((todo) => !todo.done);
+  }
+
+  if (state.filter === "done") {
+    return state.todos.filter((todo) => todo.done);
+  }
+
+  return state.todos;
+}
+
+function getRemainingCount(state: TodoListSnapshot) {
+  return state.todos.filter((todo) => !todo.done).length;
+}
+
+function getCompletedCount(state: TodoListSnapshot) {
+  return state.todos.filter((todo) => todo.done).length;
+}
+
+function canSubmitDraft(state: TodoListSnapshot) {
+  return state.draft.trim().length > 0;
+}
+
+function hasCompletedTodos(state: TodoListSnapshot) {
+  return state.todos.some((todo) => todo.done);
 }
 
 export function App() {
@@ -89,33 +93,16 @@ export function App() {
   const [notice, setNotice] = useState<string | null>(null);
 
   const todoList = useManagedState((todoList: TodoListHandle) => {
-    const draft = todoList.select((state) => state.draft);
-    const filter = todoList.select((state) => state.filter);
-    const todos = todoList.select((state) => state.todos);
+    const draft = computed(() => todoList.get().draft);
+    const filter = computed(() => todoList.get().filter);
+    const todos = computed(() => todoList.get().todos);
 
-    // Filtering stays next to the state model, so the view only renders.
-    const visibleTodos = todoList.select((state) => {
-      if (state.filter === "active") {
-        return state.todos.filter((todo) => !todo.done);
-      }
-
-      if (state.filter === "done") {
-        return state.todos.filter((todo) => todo.done);
-      }
-
-      return state.todos;
-    });
-
-    const remainingCount = todoList.select(
-      (state) => state.todos.filter((todo) => !todo.done).length,
-    );
-    const completedCount = todoList.select(
-      (state) => state.todos.filter((todo) => todo.done).length,
-    );
-    const canCreate = todoList.select((state) => state.draft.trim().length > 0);
-    const hasCompletedTodos = todoList.select(
-      (state) => state.todos.some((todo) => todo.done),
-    );
+    // Memoize the reactive reads the view touches repeatedly.
+    const visibleTodos = computed(() => getVisibleTodos(todoList.get()));
+    const remainingCount = computed(() => getRemainingCount(todoList.get()));
+    const completedCount = computed(() => getCompletedCount(todoList.get()));
+    const canCreate = computed(() => canSubmitDraft(todoList.get()));
+    const hasCompleted = computed(() => hasCompletedTodos(todoList.get()));
 
     return {
       draft,
@@ -125,7 +112,7 @@ export function App() {
       remainingCount,
       completedCount,
       canCreate,
-      hasCompletedTodos,
+      hasCompletedTodos: hasCompleted,
       setDraft(nextDraft: string) {
         todoList.set((state) => {
           state.draft = nextDraft;
@@ -162,7 +149,9 @@ export function App() {
         });
       },
       removeTodo(id: string) {
-        const todo = todoList.get().todos.find((candidate) => candidate.id === id);
+        const todo = todoList
+          .get()
+          .todos.find((candidate) => candidate.id === id);
         if (!todo) {
           return;
         }
@@ -212,7 +201,9 @@ export function App() {
   });
 
   useEventTarget(todoList, "clearedCompleted", (event) => {
-    setNotice(`Cleared ${event.count} completed item${event.count === 1 ? "" : "s"}`);
+    setNotice(
+      `Cleared ${event.count} completed item${event.count === 1 ? "" : "s"}`,
+    );
   });
 
   useEffect(() => {
@@ -258,8 +249,7 @@ export function App() {
             <span>What needs attention?</span>
             <input
               value={todoList.draft}
-              onInput={(event) =>
-                todoList.setDraft(event.currentTarget.value)}
+              onInput={(event) => todoList.setDraft(event.currentTarget.value)}
               placeholder="Ship the polished example"
             />
           </label>
@@ -300,7 +290,11 @@ export function App() {
                   checked={todo.done}
                   onInput={() => todoList.toggleTodo(todo.id)}
                 />
-                <span class={todo.done ? "todo-title todo-title-done" : "todo-title"}>
+                <span
+                  class={
+                    todo.done ? "todo-title todo-title-done" : "todo-title"
+                  }
+                >
                   {todo.title}
                 </span>
               </label>
@@ -331,7 +325,10 @@ export function App() {
         </footer>
       </section>
 
-      <aside class={notice ? "notice notice-visible" : "notice"} aria-live="polite">
+      <aside
+        class={notice ? "notice notice-visible" : "notice"}
+        aria-live="polite"
+      >
         {notice}
       </aside>
     </main>

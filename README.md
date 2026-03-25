@@ -6,18 +6,23 @@ For guidance on naming, inference, and API design conventions, see [`best_practi
 
 ## Big Picture
 
-Define state once, return a few actions and derived values, and consume the result as reactive immutable data.
+Define state once, return a few actions, and keep ordinary derivations as plain functions.
 
 ```ts
-import { defineManagedState, type StateHandle } from "preact-sigma";
+import { computed, defineManagedState, type StateHandle } from "preact-sigma";
 
 type CounterEvents = {
   thresholdReached: [{ count: number }];
 };
 
+function getDoubledCount(count: number) {
+  return count * 2;
+}
+
 const Counter = defineManagedState(
   (counter: StateHandle<number, CounterEvents>, step: number) => {
-    const doubled = counter.select((count) => count * 2);
+    // Only expose a computed when callers benefit from a memoized reactive read.
+    const doubled = computed(() => getDoubledCount(counter.get()));
 
     return {
       count: counter,
@@ -40,6 +45,7 @@ const Counter = defineManagedState(
 const state = new Counter(2);
 
 state.count;
+getDoubledCount(state.count);
 state.doubled;
 state.increment();
 
@@ -85,19 +91,62 @@ new Counter().count;
 
 ## Derive Values
 
-Use `.select()` to derive tracked values, then return them to expose them as getter properties.
+Prefer plain external functions for ordinary derivations so unused helpers can be tree-shaken.
 
 ```ts
 import { defineManagedState, type StateHandle } from "preact-sigma";
 
+function getDoubledCount(count: number) {
+  return count * 2;
+}
+
 const Counter = defineManagedState(
   (count: StateHandle<number>) => ({
-    doubled: count.select((count) => count * 2),
+    count,
   }),
   0
 );
 
-new Counter().doubled;
+const counter = new Counter();
+
+getDoubledCount(counter.count);
+```
+
+Use `computed()` only when you need a memoized reactive derivation for performance.
+
+```ts
+import { computed, defineManagedState, type StateHandle } from "preact-sigma";
+
+type Todo = {
+  done: boolean;
+};
+
+type TodoListState = {
+  filter: "all" | "active" | "done";
+  todos: Todo[];
+};
+
+function getVisibleTodos(state: TodoListState) {
+  if (state.filter === "active") {
+    return state.todos.filter((todo) => !todo.done);
+  }
+
+  if (state.filter === "done") {
+    return state.todos.filter((todo) => todo.done);
+  }
+
+  return state.todos;
+}
+
+const TodoList = defineManagedState(
+  (todoList: StateHandle<TodoListState>) => ({
+    state: todoList,
+    visibleTodos: computed(() => getVisibleTodos(todoList.get())),
+  }),
+  { filter: "all", todos: [] }
+);
+
+new TodoList().visibleTodos;
 ```
 
 ## Update State
@@ -199,11 +248,11 @@ Use `useManagedState()` when you want the same pattern directly inside a compone
 import { useManagedState, type StateHandle } from "preact-sigma";
 
 function SearchBox() {
-  const search = useManagedState(
-    (state: StateHandle<{ query: string }>) => ({
-      query: state.select((value) => value.query),
+  const model = useManagedState(
+    (search: StateHandle<{ query: string }>) => ({
+      search,
       setQuery(query: string) {
-        state.set((draft) => {
+        search.set((draft) => {
           draft.query = query;
         });
       },
@@ -213,8 +262,8 @@ function SearchBox() {
 
   return (
     <input
-      value={search.query}
-      onInput={(event) => search.setQuery(event.currentTarget.value)}
+      value={model.search.query}
+      onInput={(event) => model.setQuery(event.currentTarget.value)}
     />
   );
 }
@@ -252,15 +301,17 @@ useEventTarget(counter, "thresholdReached", (event) => {
 
 ## Reach For Signals Helpers
 
-`batch` and `untracked` are re-exported from `@preact/signals`.
+`batch`, `computed`, and `untracked` are re-exported from `@preact/signals`.
 
 ```ts
-import { batch, untracked } from "preact-sigma";
+import { batch, computed, untracked } from "preact-sigma";
 
 batch(() => {
   counter.increment();
   counter.reset();
 });
+
+const doubled = computed(() => counter.count * 2);
 
 untracked(() => {
   console.log(counter.count);

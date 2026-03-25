@@ -1,9 +1,12 @@
 import { defineManagedState, StateHandle } from "./framework";
 
+function getDoubledCount(count: number) {
+  return count * 2;
+}
+
 const Counter = defineManagedState(
   (count: StateHandle<number>) => ({
     count,
-    doubledCount: count.select((count) => count * 2),
     increment() {
       count.set((count) => count + 1);
     },
@@ -17,5 +20,6 @@ const Counter = defineManagedState(
 const counter = new Counter();
 counter.peek();
 counter.increment();
+getDoubledCount(counter.count);
 counter.subscribe((state) => {});
-counter.get("doubledCount").subscribe((value) => {});
+counter.get("count").subscribe((value) => {});
