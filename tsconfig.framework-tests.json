@@ -2,6 +2,7 @@
   "compilerOptions": {
     "composite": true,
     "strict": true,
+    "types": ["node"],
     "lib": ["dom", "esnext"],
     "target": "esnext",
     "module": "esnext",
