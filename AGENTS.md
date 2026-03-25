@@ -11,3 +11,4 @@
 
 - When the user corrects the agent on a general style or discipline preference, and the correction is not domain-specific or overly specific, add that guidance to `AGENTS.md` so it applies going forward.
 - Keep that `AGENTS.md` update in a separate commit from other work.
+- Avoid speculative performance memoization. Prefer plain derivation until benchmarks justify caching, and if one cached derivation is kept, make the tradeoff explicit.
