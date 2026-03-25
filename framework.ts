@@ -479,11 +479,12 @@ export function useEventTarget<
 ): void {
   listener = useStableCallback(listener) as typeof listener;
   useEffect(() => {
-    // Managed state is secretly an EventTarget, so this is safe.
-    if (target instanceof EventTarget) {
-      target.addEventListener(name, listener);
-      return () => target.removeEventListener(name, listener);
+    if (!target) return;
+    if (isManagedState(target)) {
+      return target.on(name, listener);
     }
+    target.addEventListener(name, listener);
+    return () => target.removeEventListener(name, listener);
   }, [target, name]);
 }
 
