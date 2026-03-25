@@ -93,7 +93,7 @@ export function App() {
   const totalTodoCount = todoList.items.length;
 
   return (
-    <main class="todo-page">
+    <main class={totalTodoCount === 0 ? "todo-page is-empty" : "todo-page"}>
       <section class="todo-card" aria-labelledby="todo-title">
         <header class="todo-header">
           <div>
