@@ -13,7 +13,7 @@ import {
 export { batch, computed, untracked } from "@preact/signals";
 export { isManagedState } from "./internal.ts";
 
-export type EventTypes = Record<string, [any?]>;
+export type EventsDefinition = Record<string, [any?]>;
 
 type FilterProperties<T extends object, U> = {} & {
   [P in {
@@ -39,7 +39,7 @@ type InferState<TProps extends object> = {} & Immutable<{
 }> &
   Readonly<InferManagedStates<TProps>>;
 
-export type AnyManagedState<TState = any, TEvents extends EventTypes = any> = {
+export type AnyManagedState<TState = any, TEvents extends EventsDefinition = any> = {
   /** Get the underlying signal for an exposed signal-backed public property. */
   get<K extends keyof OmitManagedStates<TState>>(
     key: K,
@@ -81,7 +81,7 @@ export type AnyManagedState<TState = any, TEvents extends EventTypes = any> = {
  */
 export type ManagedState<
   TState,
-  TEvents extends EventTypes = EventTypes,
+  TEvents extends EventsDefinition = EventsDefinition,
   TProps extends object = Record<string, unknown>,
 > = AnyManagedState<TState, TEvents> & Immutable<TState> & TProps;
 
@@ -139,7 +139,7 @@ export type Lens<TState = any> = {
  * `computed(() => derive(handle.get()))` only when you need memoized reactive
  * reads as a performance optimization.
  */
-export type StateHandle<TState, TEvents extends EventTypes = never> = AnyStateHandle<
+export type StateHandle<TState, TEvents extends EventsDefinition = never> = AnyStateHandle<
   TState,
   TEvents
 > &
@@ -167,7 +167,7 @@ export type StateHandle<TState, TEvents extends EventTypes = never> = AnyStateHa
  */
 export type StateConstructor<
   TState,
-  TEvents extends EventTypes,
+  TEvents extends EventsDefinition,
   TParams extends any[],
   TProps extends object = {},
 > = (
@@ -213,7 +213,7 @@ export type StateConstructor<
  */
 export function defineManagedState<
   TState,
-  TEvents extends EventTypes,
+  TEvents extends EventsDefinition,
   TParams extends any[],
   TProps extends object = {},
   TInitialState extends TState = TState,

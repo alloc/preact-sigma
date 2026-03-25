@@ -1,7 +1,7 @@
 import { action, computed, type ReadonlySignal, Signal } from "@preact/signals";
 import { castImmutable, produce, type Immutable, type Producer } from "immer";
 
-import type { AnyManagedState, EventTypes, Lens, StateHandle } from "./framework.ts";
+import type { AnyManagedState, EventsDefinition, Lens, StateHandle } from "./framework.ts";
 
 type Cleanup = () => void;
 type Disposable = {
@@ -121,7 +121,7 @@ function makeNonEnumerable(object: object, keys: string[]) {
   }
 }
 
-export class AnyStateHandle<TState = any, TEvents extends EventTypes = any> {
+export class AnyStateHandle<TState = any, TEvents extends EventsDefinition = any> {
   constructor(
     private readonly state: Signal<Immutable<TState>>,
     /**
@@ -156,7 +156,7 @@ export class AnyStateHandle<TState = any, TEvents extends EventTypes = any> {
   }
 }
 
-export function createStateHandle<TState, TEvents extends EventTypes>(
+export function createStateHandle<TState, TEvents extends EventsDefinition>(
   state: Signal<Immutable<TState>>,
   emit: (name: string, detail?: any) => any,
   own: (resources: OwnedResources) => void,

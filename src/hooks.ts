@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 
 import type {
   AnyManagedState,
-  EventTypes,
+  EventsDefinition,
   Lens,
   ManagedState,
   StateConstructor,
@@ -47,7 +47,7 @@ function isFunction(value: unknown): value is (...args: any[]) => any {
  */
 export function useManagedState<
   TState,
-  TEvents extends EventTypes,
+  TEvents extends EventsDefinition,
   TProps extends object = {},
   TInitialState extends TState = TState,
 >(
@@ -88,14 +88,14 @@ export function useSubscribe<T>(
 }
 
 type InferEvent<T extends EventTarget | AnyManagedState> =
-  T extends AnyManagedState<any, infer TEvents extends EventTypes>
+  T extends AnyManagedState<any, infer TEvents extends EventsDefinition>
     ? string & keyof TEvents
     : T extends { addEventListener: (name: infer TEvent) => any }
       ? string & TEvent
       : string;
 
 type InferEventListener<T extends EventTarget | AnyManagedState, TEvent extends string = any> =
-  T extends AnyManagedState<any, infer TEvents extends EventTypes>
+  T extends AnyManagedState<any, infer TEvents extends EventsDefinition>
     ? TEvent extends string & keyof TEvents
       ? (...args: TEvents[TEvent]) => void
       : never
