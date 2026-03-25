@@ -1,6 +1,7 @@
 import {
   defineManagedState,
   type Lens,
+  query,
   type StateHandle,
 } from "../framework.js";
 
@@ -17,6 +18,10 @@ type _primitiveHasNoLens = Assert<
   Equal<HasKey<StateHandle<number>, "query">, false>
 >;
 type _arrayHasNoLens = Assert<Equal<HasKey<StateHandle<string[]>, 0>, false>>;
+const identityQuery = query((value: number) => value);
+type _queryPreservesType = Assert<
+  Equal<typeof identityQuery, (value: number) => number>
+>;
 
 const CounterManager = defineManagedState(
   (counter: StateHandle<{ count: number }>) => ({

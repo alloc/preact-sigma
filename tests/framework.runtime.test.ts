@@ -5,6 +5,7 @@ import {
   computed,
   defineManagedState,
   isManagedState,
+  query,
   type StateHandle,
 } from "../framework.js";
 
@@ -86,4 +87,32 @@ test("composed managed states pass through unchanged", () => {
   assert.equal(snapshots.at(-1)?.counter, dashboard.counter);
 
   unsubscribe();
+});
+
+test("query methods keep signal tracking when they read state", () => {
+  const CounterManager = defineManagedState(
+    (count: StateHandle<number>) => ({
+      count,
+      readCount: query(() => count.get()),
+      readCountUntracked() {
+        return count.get();
+      },
+      increment() {
+        count.set((value) => value + 1);
+      },
+    }),
+    0,
+  );
+
+  const counter = new CounterManager();
+  const trackedCount = computed(() => counter.readCount());
+  const untrackedCount = computed(() => counter.readCountUntracked());
+
+  assert.equal(trackedCount.value, 0);
+  assert.equal(untrackedCount.value, 0);
+
+  counter.increment();
+
+  assert.equal(trackedCount.value, 1);
+  assert.equal(untrackedCount.value, 0);
 });

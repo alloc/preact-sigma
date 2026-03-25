@@ -12,6 +12,7 @@ import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 export { batch, computed, untracked } from "@preact/signals";
 
 type EventTypes = Record<string, [any?]>;
+const queryMethods = new WeakSet<(...args: any[]) => any>();
 
 type FilterProperties<T extends object, U> = {} & {
   [P in {
@@ -115,6 +116,22 @@ export type ManagedState<
 > = AnyManagedState<TState, TEvents> & Immutable<TState> & TProps;
 
 /**
+ * Mark a constructor-returned method as a tracked query.
+ *
+ * Query methods wrap their body in `computed()`, so reads inside the method
+ * participate in signal tracking even after the method is exposed publicly.
+ * Tagged query methods also skip the default `action()` wrapping step.
+ */
+export function query<TFunction extends (...args: any[]) => any>(
+  fn: TFunction,
+): TFunction {
+  const wrapped = ((...args: Parameters<TFunction>) =>
+    computed(() => fn(...args)).value) as TFunction;
+  queryMethods.add(wrapped);
+  return wrapped;
+}
+
+/**
  * Constructor-local access to one top-level property of an object-shaped base
  * state.
  *
@@ -186,7 +203,8 @@ export type StateConstructor<
  * the library uses to infer the internal state and event types.
  *
  * Methods are automatically wrapped with `action()` from `@preact/signals`, so
- * they are untracked and batched.
+ * they are untracked and batched unless you opt into tracked reads with
+ * `query()`.
  *
  * The state constructor must return an object with properties that are either:
  * - A function (to expose methods)
@@ -248,7 +266,7 @@ class StateContainer extends EventTarget {
         let { value } = propDescriptor;
         if (typeof value === "function") {
           Object.defineProperty(this, key, {
-            value: action(value),
+            value: queryMethods.has(value) ? value : action(value),
           });
           continue;
         }
