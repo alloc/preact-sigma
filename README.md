@@ -108,23 +108,23 @@ const Counter = defineManagedState(
 new Counter().doubled;
 ```
 
-## Read Base State Inside A Constructor
+## Create A Tracked Query Method
 
-Use `handle.get()` when you want a tracked read of the current base state.
+Use `query()` when you want a public method whose reads stay tracked.
 
 ```ts
-import { defineManagedState, type StateHandle } from "preact-sigma";
+import { defineManagedState, query, type StateHandle } from "preact-sigma";
 
 type CounterState = number;
 
 const Counter = defineManagedState(
   (counter: StateHandle<CounterState>) => ({
-    isPositive() {
-      return counter.get() > 0;
-    },
+    isPositive: query(() => counter.get() > 0),
   }),
   0
 );
+
+new Counter().isPositive();
 ```
 
 ## Read Base State Without Tracking
@@ -148,7 +148,7 @@ const Counter = defineManagedState(
 
 ## Use Top-Level Lenses
 
-When the base state is object-shaped, the constructor handle exposes a shallow lens for each top-level property.
+When the base state is object-shaped, the constructor handle exposes a shallow lens for each top-level property, and you can return that lens directly.
 
 ```ts
 import { computed, defineManagedState, type StateHandle } from "preact-sigma";
@@ -159,6 +159,7 @@ type SearchState = {
 
 const Search = defineManagedState(
   (search: StateHandle<SearchState>) => ({
+    query: search.query,
     trimmedQuery: computed(() => search.query.get().trim()),
     setQuery(query: string) {
       search.query.set(query);
@@ -166,6 +167,8 @@ const Search = defineManagedState(
   }),
   { query: "" }
 );
+
+new Search().query;
 ```
 
 ## Compose Managed States
@@ -314,7 +317,7 @@ const stopState = counter.subscribe((value) => {
 Use `useManagedState()` when you want the same pattern directly inside a component.
 
 ```tsx
-import { computed, useManagedState, type StateHandle } from "preact-sigma";
+import { useManagedState, type StateHandle } from "preact-sigma";
 
 type SearchState = {
   query: string;
@@ -323,7 +326,7 @@ type SearchState = {
 function SearchBox() {
   const search = useManagedState(
     (search: StateHandle<SearchState>) => ({
-      query: computed(() => search.query.get()),
+      query: search.query,
       setQuery(query: string) {
         search.query.set(query);
       },

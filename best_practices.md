@@ -66,6 +66,7 @@ type SearchState = {
 
 const Search = defineManagedState(
   (search: StateHandle<SearchState>) => ({
+    query: search.query,
     setQuery(query: string) {
       search.query.set(query);
     },
@@ -74,6 +75,23 @@ const Search = defineManagedState(
     },
   }),
   { query: "" },
+);
+```
+
+Return the top-level lens itself when one public field should stay reactive without exposing the whole base state.
+
+## Use `query()` For Tracked Public Reads
+
+Returned methods are action-wrapped by default. When a public method is conceptually a read, tag it with `query()` so its body participates in signal tracking.
+
+That keeps read-style methods reactive without turning ordinary mutating actions into tracked code.
+
+```ts
+const Counter = defineManagedState(
+  (counter: StateHandle<number>) => ({
+    isPositive: query(() => counter.get() > 0),
+  }),
+  0,
 );
 ```
 
