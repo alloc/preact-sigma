@@ -1,8 +1,12 @@
 {
-  "name": "immer-test",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "name": "preact-sigma",
+  "type": "module",
+  "version": "0.1.0",
+  "exports": {
+    ".": {
+      "import": "./framework.ts"
+    }
+  },
   "scripts": {
     "dev": "tsx --watch main.ts",
     "dev:todo-list": "vite --config examples/todo-list/vite.config.ts",
@@ -22,6 +26,7 @@
   "dependencies": {
     "@preact/signals": "^2.8.2",
     "immer": "^11.1.4",
-    "preact": "11.0.0-beta.1"
+    "preact": "11.0.0-beta.1",
+    "preact-sigma": "link:"
   }
 }

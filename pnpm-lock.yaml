@@ -17,6 +17,9 @@ importers:
       preact:
         specifier: 11.0.0-beta.1
         version: 11.0.0-beta.1
+      preact-sigma:
+        specifier: 'link:'
+        version: 'link:'
     devDependencies:
       '@preact/preset-vite':
         specifier: ^2.10.5
