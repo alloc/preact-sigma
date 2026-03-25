@@ -10,4 +10,4 @@
 - Agent maintenance
   - When the user corrects the agent on a general style or discipline preference, and the correction is not domain-specific or overly specific, add that guidance to `AGENTS.md` so it applies going forward.
   - Keep that `AGENTS.md` update in a separate commit from other work.
-  - Add guidance under the category it actually belongs to. Create a new category only when the guidance is broadly applicable rather than domain-specific or project-specific.
+  - Add guidance under the category it actually belongs to. Keep categories broad and generally reusable rather than narrowly scoped.
