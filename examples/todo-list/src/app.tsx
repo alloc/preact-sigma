@@ -13,10 +13,7 @@ type TodoListState = {
 };
 
 function createId() {
-  if (
-    typeof crypto !== "undefined" &&
-    typeof crypto.randomUUID === "function"
-  ) {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();
   }
 
@@ -132,10 +129,7 @@ export function App() {
         {totalTodoCount > 0 ? (
           <ul class="todo-list" aria-label="Todos">
             {todoList.items.map((todo) => (
-              <li
-                key={todo.id}
-                class={todo.completed ? "todo-item is-completed" : "todo-item"}
-              >
+              <li key={todo.id} class={todo.completed ? "todo-item is-completed" : "todo-item"}>
                 <label class="todo-toggle-wrap">
                   <input
                     class="todo-toggle"
@@ -160,9 +154,7 @@ export function App() {
         ) : (
           <div class="todo-empty" role="status">
             <p class="todo-empty-title">Nothing left on the board.</p>
-            <p class="todo-empty-body">
-              Add a task above to start the list again.
-            </p>
+            <p class="todo-empty-body">Add a task above to start the list again.</p>
           </div>
         )}
       </section>

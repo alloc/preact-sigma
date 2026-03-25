@@ -6,25 +6,19 @@ import {
   query,
   type StateHandle,
   useManagedState,
-} from "../framework.js";
+} from "../src/index.js";
 
 type Assert<T extends true> = T;
 type Equal<A, B> =
-  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2
-    ? true
-    : false;
+  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
 type HasKey<T, K extends PropertyKey> = K extends keyof T ? true : false;
 
 type SearchHandle = StateHandle<{ query: string }>;
 type _lensIsExposed = Assert<Equal<SearchHandle["query"], Lens<string>>>;
-type _primitiveHasNoLens = Assert<
-  Equal<HasKey<StateHandle<number>, "query">, false>
->;
+type _primitiveHasNoLens = Assert<Equal<HasKey<StateHandle<number>, "query">, false>>;
 type _arrayHasNoLens = Assert<Equal<HasKey<StateHandle<string[]>, 0>, false>>;
 const identityQuery = query((value: number) => value);
-type _queryPreservesType = Assert<
-  Equal<typeof identityQuery, (value: number) => number>
->;
+type _queryPreservesType = Assert<Equal<typeof identityQuery, (value: number) => number>>;
 // @ts-expect-error query callbacks are closure-based and do not use `this`
 query(function (this: { count: number }) {
   return this.count;
@@ -119,29 +113,26 @@ useManagedState(
   () => ({ query: 123 }),
 );
 
-const OwningManager = defineManagedState(
-  (handle: StateHandle<{}>) => {
-    const child = new CounterManager();
+const OwningManager = defineManagedState((handle: StateHandle<{}>) => {
+  const child = new CounterManager();
 
-    handle.own(() => {});
-    handle.own(child);
-    handle.own({
+  handle.own(() => {});
+  handle.own(child);
+  handle.own({
+    [Symbol.dispose]() {},
+  });
+  handle.own([
+    () => {},
+    child,
+    {
       [Symbol.dispose]() {},
-    });
-    handle.own([
-      () => {},
-      child,
-      {
-        [Symbol.dispose]() {},
-      },
-    ]);
+    },
+  ]);
 
-    return {
-      child,
-    };
-  },
-  {},
-);
+  return {
+    child,
+  };
+}, {});
 
 const owning = new OwningManager();
 owning.dispose();

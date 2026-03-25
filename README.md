@@ -2,7 +2,17 @@
 
 Managed UI state for Preact Signals, with Immer-powered updates and a small public API.
 
-For naming and API design conventions, see [best_practices.md](./best_practices.md).
+For naming and API design conventions, see [best-practices.md](./best-practices.md).
+
+## Install
+
+```sh
+pnpm add preact-sigma
+```
+
+```sh
+npm install preact-sigma
+```
 
 ## Big Picture
 
@@ -36,7 +46,7 @@ const Counter = defineManagedState(
       },
     };
   },
-  0
+  0,
 );
 
 const counter = new Counter(2);
@@ -71,7 +81,7 @@ const Counter = defineManagedState(
       counter.set((value) => value + 1);
     },
   }),
-  0
+  0,
 );
 ```
 
@@ -88,7 +98,7 @@ const Counter = defineManagedState(
   (count: StateHandle<CounterState>) => ({
     count,
   }),
-  0
+  0,
 );
 
 new Counter().count;
@@ -107,7 +117,7 @@ const Counter = defineManagedState(
   (counter: StateHandle<CounterState>) => ({
     doubled: computed(() => counter.get() * 2),
   }),
-  0
+  0,
 );
 
 new Counter().doubled;
@@ -128,7 +138,7 @@ const Counter = defineManagedState(
   (counter: StateHandle<CounterState>) => ({
     isPositive: query(() => counter.get() > 0),
   }),
-  0
+  0,
 );
 
 new Counter().isPositive();
@@ -149,7 +159,7 @@ const Counter = defineManagedState(
       console.log(counter.peek());
     },
   }),
-  0
+  0,
 );
 ```
 
@@ -172,7 +182,7 @@ const Search = defineManagedState(
       search.query.set(query);
     },
   }),
-  { query: "" }
+  { query: "" },
 );
 
 new Search().query;
@@ -197,7 +207,7 @@ const Search = defineManagedState(
       search.page.set((page) => page + 1);
     },
   }),
-  { page: 1, query: "" }
+  { page: 1, query: "" },
 );
 
 const search = new Search();
@@ -223,7 +233,7 @@ const Counter = defineManagedState(
       count.set((value) => value + 1);
     },
   }),
-  0
+  0,
 );
 
 type DashboardState = {
@@ -235,7 +245,7 @@ const Dashboard = defineManagedState(
     dashboard,
     counter: new Counter(),
   }),
-  { ready: false }
+  { ready: false },
 );
 
 new Dashboard().counter.increment();
@@ -263,7 +273,7 @@ const Poller = defineManagedState(
       poller.own([() => window.clearInterval(interval)]);
     },
   }),
-  { ticks: 0 }
+  { ticks: 0 },
 );
 
 const poller = new Poller();
@@ -291,7 +301,7 @@ const Search = defineManagedState(
       });
     },
   }),
-  { query: "" }
+  { query: "" },
 );
 ```
 
@@ -318,7 +328,7 @@ const Todo = defineManagedState(
       todo.emit("selected", { id });
     },
   }),
-  {}
+  {},
 );
 ```
 
@@ -408,14 +418,11 @@ function SearchBox() {
         search.query.set(query);
       },
     }),
-    () => ({ query: "" })
+    () => ({ query: "" }),
   );
 
   return (
-    <input
-      value={search.query}
-      onInput={(event) => search.setQuery(event.currentTarget.value)}
-    />
+    <input value={search.query} onInput={(event) => search.setQuery(event.currentTarget.value)} />
   );
 }
 ```
@@ -487,7 +494,7 @@ const Dialog = defineManagedState(
       dialog.set(false);
     },
   }),
-  false
+  false,
 );
 ```
 
@@ -496,3 +503,7 @@ Keep using plain `useState()` when the state is trivial.
 ```tsx
 const [open, setOpen] = useState(false);
 ```
+
+## License
+
+MIT. See [LICENSE-MIT](./LICENSE-MIT).

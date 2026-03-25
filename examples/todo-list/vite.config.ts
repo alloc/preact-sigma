@@ -7,7 +7,7 @@ export default defineConfig({
   plugins: [preact()],
   resolve: {
     alias: {
-      "preact-sigma": fileURLToPath(new URL("../../framework.ts", import.meta.url)),
+      "preact-sigma": fileURLToPath(new URL("../../src/index.ts", import.meta.url)),
     },
   },
   build: {

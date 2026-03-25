@@ -1,7 +1,7 @@
 import { defineConfig } from "tsdown";
 
 export default defineConfig({
-  entry: "./framework.ts",
+  entry: "./src/index.ts",
   format: ["esm"],
   outDir: "dist",
   clean: true,

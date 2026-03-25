@@ -1,36 +1,45 @@
 {
   "name": "preact-sigma",
-  "type": "module",
   "version": "0.1.0",
+  "keywords": [],
+  "license": "MIT",
+  "author": "Alec Larson",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/alloc/preact-sigma.git"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
   "exports": {
     ".": {
-      "import": "./framework.ts"
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
     }
   },
   "scripts": {
-    "dev": "tsx --watch main.ts",
-    "dev:todo-list": "vite --config examples/todo-list/vite.config.ts",
-    "build:todo-list": "vite build --config examples/todo-list/vite.config.ts",
+    "build": "tsdown",
     "test": "pnpm run test:runtime && pnpm run test:types",
     "test:runtime": "tsx --test tests/framework.runtime.test.ts",
-    "test:types": "tsc -p tsconfig.framework-tests.json --noEmit"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "devDependencies": {
-    "@preact/preset-vite": "^2.10.5",
-    "@types/node": "^25.5.0",
-    "tsdown": "^0.21.4",
-    "tsx": "^4.21.0",
-    "typescript": "^6.0.2",
-    "vite": "^8.0.2"
+    "test:types": "tsc -p tsconfig.framework-tests.json --noEmit",
+    "fmt": "oxfmt",
+    "lint": "oxlint"
   },
   "dependencies": {
     "@preact/signals": "^2.8.2",
     "immer": "^11.1.4",
+    "preact": "11.0.0-beta.1"
+  },
+  "devDependencies": {
+    "@preact/preset-vite": "^2.10.5",
+    "@types/node": "^25.5.0",
     "lucide-react": "^1.6.0",
-    "preact": "11.0.0-beta.1",
-    "preact-sigma": "link:"
+    "oxfmt": "^0.42.0",
+    "oxlint": "^1.57.0",
+    "tsdown": "^0.21.4",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2",
+    "vite": "^8.0.2"
   }
 }

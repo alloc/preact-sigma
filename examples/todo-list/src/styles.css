@@ -294,9 +294,7 @@ button {
 
 .todo-toggle:checked {
   border-color: var(--accent);
-  background:
-    radial-gradient(circle at 50% 50%, #fffaf5 0 28%, transparent 30%),
-    var(--accent);
+  background: radial-gradient(circle at 50% 50%, #fffaf5 0 28%, transparent 30%), var(--accent);
   box-shadow: 0 0 0 4px rgba(49, 91, 78, 0.1);
 }
 

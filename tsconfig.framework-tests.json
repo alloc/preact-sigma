@@ -10,5 +10,5 @@
     "allowImportingTsExtensions": true,
     "emitDeclarationOnly": true
   },
-  "include": ["framework.ts", "tests/framework.types.test.ts"]
+  "include": ["src/**/*.ts", "tests/framework.types.test.ts"]
 }
