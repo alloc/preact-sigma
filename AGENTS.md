@@ -1,14 +1,13 @@
-# API Description Preferences
-
-- Keep public API descriptions factual and behavioral. Move prescriptive advice and conventions to a separate best-practices document.
-- State clearly where type inference comes from when that affects how the API should be written or consumed.
-- Describe callbacks by what they receive, not by what they do not receive.
-- When a returned value becomes a public reactive property, say that explicitly.
-- Call out especially useful behavior when it clarifies intent, particularly for nested or non-obvious use cases.
-- Keep AI-specific authoring conventions, naming guidance, and other best-practice material out of the public API surface.
-
-# Agent Maintenance
-
-- When the user corrects the agent on a general style or discipline preference, and the correction is not domain-specific or overly specific, add that guidance to `AGENTS.md` so it applies going forward.
-- Keep that `AGENTS.md` update in a separate commit from other work.
-- Avoid speculative performance memoization. Prefer plain derivation until benchmarks justify caching, and if one cached derivation is kept, make the tradeoff explicit.
+- API descriptions
+  - Keep public API descriptions factual and behavioral. Move prescriptive advice and conventions to a separate best-practices document.
+  - State clearly where type inference comes from when that affects how the API should be written or consumed.
+  - Describe callbacks by what they receive, not by what they do not receive.
+  - When a returned value becomes a public reactive property, say that explicitly.
+  - Call out especially useful behavior when it clarifies intent, particularly for nested or non-obvious use cases.
+  - Keep AI-specific authoring conventions, naming guidance, and other best-practice material out of the public API surface.
+- Performance guidance
+  - Avoid speculative performance memoization. Prefer plain derivation until benchmarks justify caching, and if one cached derivation is kept, make the tradeoff explicit.
+- Agent maintenance
+  - When the user corrects the agent on a general style or discipline preference, and the correction is not domain-specific or overly specific, add that guidance to `AGENTS.md` so it applies going forward.
+  - Keep that `AGENTS.md` update in a separate commit from other work.
+  - Add guidance under the category it actually belongs to. Create a new category only when the guidance is broadly applicable rather than domain-specific or project-specific.
