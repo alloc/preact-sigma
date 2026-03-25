@@ -11,7 +11,9 @@
     "dev": "tsx --watch main.ts",
     "dev:todo-list": "vite --config examples/todo-list/vite.config.ts",
     "build:todo-list": "vite build --config examples/todo-list/vite.config.ts",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "pnpm run test:runtime && pnpm run test:types",
+    "test:runtime": "tsx --test tests/framework.runtime.test.ts",
+    "test:types": "tsc -p tsconfig.framework-tests.json --noEmit"
   },
   "keywords": [],
   "author": "",

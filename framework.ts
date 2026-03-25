@@ -11,8 +11,6 @@ import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 // Don't re-export the entire API; only the most essential parts.
 export { batch, computed, untracked } from "@preact/signals";
 
-const $events = Symbol("events");
-
 type EventTypes = Record<string, [any?]>;
 
 type FilterProperties<T extends object, U> = {} & {
@@ -26,63 +24,26 @@ type InferActions<TProps extends object> = {} & FilterProperties<
   (...args: any[]) => any
 >;
 
-type InferState<TProps extends object> = {} & {
-  [K in keyof FilterProperties<
-    TProps,
-    ReadonlySignal<any> | StateHandle<any>
-  >]: TProps[K] extends ReadonlySignal<infer T> | StateHandle<infer T>
-    ? T
-    : never;
-};
+type InferManagedStates<TProps extends object> = {} & FilterProperties<
+  TProps,
+  AnyManagedState<any, any, any>
+>;
 
-interface State<TState = any, TEvents extends EventTypes = EventTypes> {
-  /** @internal */
-  [$events]: TEvents;
-  /** Get the underlying signal for an exposed signal or base-state property. */
-  get<K extends keyof TState>(key: K): ReadonlySignal<Immutable<TState[K]>>;
-  /** Read the current immutable public state without tracking. */
-  peek(): Immutable<TState>;
-  /** Subscribe to future immutable state snapshots. Returns a function to unsubscribe. */
-  subscribe(listener: (value: Immutable<TState>) => void): () => void;
-  /**
-   * Subscribe to a custom event emitted by this managed state.
-   *
-   * Your listener receives the emitted argument directly, or no argument at all.
-   */
-  on<TEvent extends string & keyof TEvents>(
-    name: TEvent,
-    listener: (...args: TEvents[TEvent]) => void,
-  ): () => void;
-}
+type InferPublicProps<TProps extends object> = InferActions<TProps> &
+  InferManagedStates<TProps>;
 
-/**
- * Public instance shape produced by `defineManagedState()` and `useManagedState()`.
- *
- * Returned signals are exposed as tracked getter properties. Returning the
- * `StateHandle` itself exposes the base state directly as a reactive immutable
- * property.
- */
-export type ManagedState<
-  TState = any,
-  TEvents extends EventTypes = EventTypes,
-  TProps extends object = {},
-> = State<TState, TEvents> & Immutable<TState> & TProps;
+type OnlyPlainObject<TState> = TState extends object
+  ? TState extends
+      | ((...args: any[]) => any)
+      | readonly any[]
+      | ReadonlyMap<any, any>
+      | ReadonlySet<any>
+    ? never
+    : TState
+  : never;
 
-/**
- * Constructor-local access to the base state.
- *
- * `TState` may be any non-function value, including primitives.
- *
- * Return this handle from the constructor when you want to expose the base
- * state directly as a reactive immutable property on the managed state.
- *
- * For ordinary derived values, prefer external functions like
- * `getVisibleTodos(state)` so unused helpers can be tree-shaken. Reach for
- * `computed(() => derive(handle.get()))` only when you need memoized reactive
- * reads as a performance optimization.
- */
-export type StateHandle<TState, TEvents extends EventTypes = never> = {
-  /** Read the current immutable base state without tracking. */
+type AnyStateHandle<TState = any, TEvents extends EventTypes = any> = {
+  /** Read the current immutable base state. This read is tracked. */
   get: () => Immutable<TState>;
   /** Replace the base state, or update it with an Immer producer. */
   set: (value: TState | Producer<TState>) => void;
@@ -97,15 +58,105 @@ export type StateHandle<TState, TEvents extends EventTypes = never> = {
     : never;
 };
 
+type InferLenses<TState> =
+  OnlyPlainObject<TState> extends infer T
+    ? [T] extends [never]
+      ? {}
+      : { readonly [K in keyof T]: Lens<T[K]> }
+    : {};
+
+type InferState<TProps extends object> = {} & {
+  [K in keyof FilterProperties<
+    TProps,
+    ReadonlySignal | AnyStateHandle
+  >]: TProps[K] extends ReadonlySignal<infer T> | AnyStateHandle<infer T>
+    ? T
+    : never;
+};
+
+type AnyManagedState<
+  TState = any,
+  TEvents extends EventTypes = any,
+  TSnapshotProps extends object = {},
+> = {
+  /** Get the underlying signal for an exposed signal or base-state property. */
+  get<K extends keyof TState>(key: K): ReadonlySignal<Immutable<TState[K]>>;
+  /** Read the current immutable public state snapshot without tracking. */
+  peek(): Immutable<TState> & TSnapshotProps;
+  /** Subscribe to future immutable state snapshots. Returns a function to unsubscribe. */
+  subscribe(listener: (value: Immutable<TState> & TSnapshotProps) => void): () => void;
+  /**
+   * Subscribe to a custom event emitted by this managed state.
+   *
+   * Your listener receives the emitted argument directly, or no argument at all.
+   */
+  on<TEvent extends string & keyof TEvents>(
+    name: TEvent,
+    listener: (...args: TEvents[TEvent]) => void,
+  ): () => void;
+};
+
+/**
+ * Public instance shape produced by `defineManagedState()` and `useManagedState()`.
+ *
+ * Returned signals are exposed as tracked getter properties. Returning the
+ * `StateHandle` itself exposes the base state directly as a reactive immutable
+ * property.
+ */
+export type ManagedState<
+  TState,
+  TEvents extends EventTypes = EventTypes,
+  TProps extends object = Record<string, unknown>,
+  TSnapshotProps extends object = InferManagedStates<TProps>,
+> = AnyManagedState<TState, TEvents, TSnapshotProps> &
+  Immutable<TState> &
+  TProps;
+
+/**
+ * Constructor-local access to one top-level property of an object-shaped base
+ * state.
+ *
+ * Lenses only exist on `StateHandle`, and `get()` reads are tracked in the
+ * same way as `StateHandle.get()`.
+ */
+export type Lens<TState = any> = {
+  /** Read the current immutable property value. This read is tracked. */
+  get: () => Immutable<TState>;
+  /** Replace the property value, or update it with an Immer producer. */
+  set: (value: TState | Producer<TState>) => void;
+};
+
+/**
+ * Constructor-local access to the base state.
+ *
+ * `TState` may be any non-function value, including primitives.
+ *
+ * Return this handle from the constructor when you want to expose the base
+ * state directly as a reactive immutable property on the managed state.
+ *
+ * When the base state is object-shaped, the handle also exposes a shallow
+ * `Lens` for each top-level property key.
+ *
+ * For ordinary derived values, prefer external functions like
+ * `getVisibleTodos(state)` so unused helpers can be tree-shaken. Reach for
+ * `computed(() => derive(handle.get()))` only when you need memoized reactive
+ * reads as a performance optimization.
+ */
+export type StateHandle<
+  TState,
+  TEvents extends EventTypes = never,
+> = AnyStateHandle<TState, TEvents> & InferLenses<TState>;
+
 /**
  * Pure constructor function for a managed state definition.
  *
  * The first parameter should be explicitly typed as `StateHandle<...>`. The
  * library infers the internal state and event types from that parameter type.
  *
- * Return only methods, signals, or the provided `StateHandle`. Returned signals
- * become tracked getter properties, and returning the handle exposes the base
- * state directly as a reactive immutable property.
+ * Return only methods, signals, the provided `StateHandle`, or a managed state
+ * instance. Returned signals become tracked getter properties, returning the
+ * handle exposes the base state directly as a reactive immutable property, and
+ * managed state instances are passed through unchanged.
  */
 export type StateConstructor<
   TState,
@@ -115,8 +166,13 @@ export type StateConstructor<
 > = (
   handle: StateHandle<TState, TEvents>,
   ...params: TParams
-) => TProps &
-  Record<string, StateHandle<any> | ReadonlySignal<any> | ((...args: any[]) => any)>;
+) => TProps & {
+  [key: string]:
+    | ((...args: any[]) => any)
+    | AnyManagedState
+    | ReadonlySignal
+    | AnyStateHandle;
+};
 
 /**
  * Define a managed state class with a private mutable implementation and an
@@ -134,6 +190,7 @@ export type StateConstructor<
  * - A function (to expose methods)
  * - A signal (to expose derived state)
  * - The state handle (to expose the reactive immutable base state directly)
+ * - A managed state instance (to compose another managed state as a property)
  *
  * Returned signals are turned into getter properties, so reads are tracked by
  * the `@preact/signals` runtime.
@@ -157,35 +214,31 @@ export function defineManagedState<
   return class extends StateContainer {
     constructor(...params: TParams) {
       const state = signal(initialState as Immutable<TState>);
-      const handle: StateHandle<TState, TEvents> = {
-        get: () => state.value,
-        set: (update) => {
-          state.value = isProducer(update)
-            ? produce(state.value, update)
-            : castImmutable(update);
-        },
-        // @ts-expect-error
-        emit: (name, detail) => {
-          this.dispatchEvent(new CustomEvent(name, { detail }));
-        },
-      };
+      const handle = createStateHandle<TState, TEvents>(state, (name, detail) =>
+        this.dispatchEvent(new CustomEvent(name, { detail })),
+      );
 
       const props = constructor(handle, ...params);
       super(state, handle, props);
     }
   } as unknown as new (
     ...params: TParams
-  ) => ManagedState<InferState<TProps>, TEvents, InferActions<TProps>>;
+  ) => ManagedState<
+    InferState<TProps>,
+    TEvents,
+    InferPublicProps<TProps>,
+    InferManagedStates<TProps>
+  >;
 }
 
 /** @internal */
 class StateContainer extends EventTarget {
   private readonly _state: Signal;
-  private readonly _handle: StateHandle<any>;
+  private readonly _handle: AnyStateHandle;
   private readonly _props: any;
   private readonly _view = computed(() => ({ ...this }));
 
-  constructor(state: Signal, handle: StateHandle<any>, props: any) {
+  constructor(state: Signal, handle: AnyStateHandle, props: any) {
     super();
     this._state = state;
     this._handle = handle;
@@ -210,9 +263,14 @@ class StateContainer extends EventTarget {
             get: () => value.value,
             enumerable: true,
           });
+        } else if (isManagedState(value)) {
+          Object.defineProperty(this, key, {
+            value,
+            enumerable: true,
+          });
         } else {
           throw new Error(
-            `Invalid property: ${key}. Must be a function, a signal, or the state handle.`,
+            `Invalid property: ${key}. Must be a function, a signal, the state handle, or a managed state.`,
           );
         }
       } else {
@@ -254,6 +312,59 @@ function isProducer<T>(value: T | Producer<T>): value is Producer<T> {
   return typeof value === "function";
 }
 
+function createStateHandle<TState, TEvents extends EventTypes>(
+  state: Signal<Immutable<TState>>,
+  emit: (name: string, detail?: any) => any,
+): StateHandle<TState, TEvents> {
+  const handle: AnyStateHandle<TState, TEvents> = {
+    get: () => state.value,
+    set: (update) => {
+      state.value = isProducer(update)
+        ? produce(state.value, update)
+        : castImmutable(update);
+    },
+    emit: emit as any,
+  };
+  const lenses = new Map<PropertyKey, Lens>();
+
+  return new Proxy(handle, {
+    get(target, key, receiver) {
+      if (Reflect.has(target, key)) {
+        return Reflect.get(target, key, receiver);
+      }
+      const currentState = state.value;
+      if (!isLensableState(currentState) || !(key in currentState)) {
+        return undefined;
+      }
+      let lens = lenses.get(key);
+      if (!lens) {
+        lens = {
+          get: () => (handle.get() as Record<PropertyKey, unknown>)[key],
+          set: (update) => {
+            handle.set(((draft: Record<PropertyKey, unknown>) => {
+              draft[key] = isProducer(update)
+                ? produce(draft[key], update as Producer<unknown>)
+                : update;
+            }) as unknown as Producer<TState>);
+          },
+        };
+        lenses.set(key, lens);
+      }
+      return lens;
+    },
+  }) as StateHandle<TState, TEvents>;
+}
+
+function isLensableState(
+  value: unknown,
+): value is Record<PropertyKey, unknown> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
 /**
  * Clean encapsulation of complex UI state.
  *
@@ -270,7 +381,12 @@ export function useManagedState<
 >(
   constructor: StateConstructor<TState, TEvents, [], TProps>,
   initialState: TInitialState | (() => TInitialState),
-): ManagedState<InferState<TProps>, TEvents, InferActions<TProps>> {
+): ManagedState<
+  InferState<TProps>,
+  TEvents,
+  InferPublicProps<TProps>,
+  InferManagedStates<TProps>
+> {
   return useState(
     () =>
       new (defineManagedState(
@@ -280,7 +396,7 @@ export function useManagedState<
   )[0];
 }
 
-function isFunction(value: unknown): value is () => any {
+function isFunction(value: unknown): value is (...args: any[]) => any {
   return typeof value === "function";
 }
 
@@ -305,19 +421,21 @@ export function useSubscribe<T>(
   useEffect(() => target?.subscribe(listener), [target]);
 }
 
-type InferEvent<T extends EventTarget | ManagedState> =
-  T extends ManagedState<any, infer TEvents>
+type InferEvent<T extends EventTarget | AnyManagedState> =
+  T extends AnyManagedState<{}, infer TEvents extends EventTypes>
     ? string & keyof TEvents
     : T extends { addEventListener: (name: infer TEvent) => any }
       ? string & TEvent
       : string;
 
 type InferEventListener<
-  T extends EventTarget | ManagedState,
+  T extends EventTarget | AnyManagedState,
   TEvent extends string = any,
 > =
-  T extends ManagedState<{}, infer TEvents>
-    ? (...args: TEvents[TEvent]) => void
+  T extends AnyManagedState<{}, infer TEvents extends EventTypes>
+    ? TEvent extends string & keyof TEvents
+      ? (...args: TEvents[TEvent]) => void
+      : never
     : T extends {
           addEventListener: (
             name: TEvent,
@@ -337,7 +455,7 @@ type InferEventListener<
  * directly, or no argument at all.
  */
 export function useEventTarget<
-  T extends EventTarget | State,
+  T extends EventTarget | AnyManagedState,
   TEvent extends InferEvent<T>,
 >(
   target: T | null,
@@ -364,6 +482,6 @@ function useStableCallback<TParams extends any[], TResult>(
 }
 
 /** Check whether a value is a managed-state instance. */
-export function isManagedState(value: unknown): value is State {
+export function isManagedState(value: unknown): value is AnyManagedState {
   return value instanceof StateContainer;
 }

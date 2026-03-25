@@ -4,9 +4,9 @@
 
 Always explicitly type the first parameter of a `defineManagedState()` or `useManagedState()` constructor as `StateHandle<...>`.
 
-When the managed state emits events, prefer declaring a separate event type alias named `${ClassName}Events` instead of writing the event map inline inside the `StateHandle` type argument.
+When the managed state emits events, prefer declaring a separate event type alias named `${ModelName}Events` instead of writing the event map inline inside the `StateHandle` type argument.
 
-When AI agents are generating code, also prefer declaring a `${ClassName}State` type alias before the event type alias, even if the state type is simple.
+When AI agents are generating code, also prefer declaring a `${ModelName}State` type alias before the event type alias, even if the state type is simple.
 
 ```ts
 type CounterState = number;
@@ -15,7 +15,7 @@ type CounterEvents = {
   thresholdReached: [{ count: number }];
 };
 
-const Counter = defineManagedState(
+const CounterManager = defineManagedState(
   (count: StateHandle<CounterState, CounterEvents>) => ({
     count,
   }),
@@ -25,7 +25,32 @@ const Counter = defineManagedState(
 
 This is how the library infers the internal state and event types. Avoid specifying explicit type parameters on `defineManagedState()` or `useManagedState()` when the constructor parameter can express the same information more locally and clearly.
 
-The extra `${ClassName}State` alias is mainly an AI-facing convention. It gives code generators the state name before they choose the handle identifier, which makes it easier for them to follow the handle naming guideline consistently.
+The extra `${ModelName}State` alias is mainly an AI-facing convention. It gives code generators the state name before they choose the handle identifier, which makes it easier for them to follow the handle naming guideline consistently.
+
+## Name The Manager Class Clearly
+
+Assign the value returned by `defineManagedState()` to a variable whose name ends with `Manager`, such as `TodoListManager` or `DialogManager`.
+
+That keeps the reusable managed-state class visually distinct from the underlying state shape and from constructor-local handle names like `todoList` or `dialog`.
+
+When you use supporting aliases, keep the unsuffixed model name for the underlying state and events.
+
+```ts
+type TodoListState = {
+  filter: "all" | "active" | "done";
+};
+
+type TodoListEvents = {
+  saved: [];
+};
+
+const TodoListManager = defineManagedState(
+  (todoList: StateHandle<TodoListState, TodoListEvents>) => ({
+    todoList,
+  }),
+  { filter: "all" },
+);
+```
 
 ## Name The Handle Precisely
 
