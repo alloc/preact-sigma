@@ -28,6 +28,7 @@
   "dependencies": {
     "@preact/signals": "^2.8.2",
     "immer": "^11.1.4",
+    "lucide-react": "^1.6.0",
     "preact": "11.0.0-beta.1",
     "preact-sigma": "link:"
   }
