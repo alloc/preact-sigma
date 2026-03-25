@@ -222,3 +222,110 @@ test("query methods keep signal tracking when they read state", () => {
   assert.equal(trackedCount.value, 1);
   assert.equal(untrackedCount.value, 0);
 });
+
+test("owned resources are disposed in reverse order and aggregate errors", () => {
+  const steps: string[] = [];
+  const firstError = new Error("first");
+  const lastError = new Error("last");
+
+  const ChildManager = defineManagedState(
+    (child: StateHandle<number>) => {
+      child.own([
+        () => {
+          steps.push("child cleanup");
+        },
+      ]);
+
+      return {
+        child,
+      };
+    },
+    0,
+  );
+
+  const ParentManager = defineManagedState(
+    (parent: StateHandle<{}>) => {
+      const child = new ChildManager();
+
+      parent.own([
+        () => {
+          steps.push("first cleanup");
+          throw firstError;
+        },
+        child,
+        {
+          [Symbol.dispose]() {
+            steps.push("last cleanup");
+            throw lastError;
+          },
+        },
+      ]);
+
+      return {
+        child,
+      };
+    },
+    {},
+  );
+
+  const parent = new ParentManager();
+
+  assert.throws(
+    () => parent.dispose(),
+    (error: unknown) => {
+      assert.equal(error instanceof AggregateError, true);
+      assert.deepEqual((error as AggregateError).errors, [lastError, firstError]);
+      return true;
+    },
+  );
+
+  assert.deepEqual(steps, [
+    "last cleanup",
+    "child cleanup",
+    "first cleanup",
+  ]);
+
+  parent.dispose();
+  assert.deepEqual(steps, [
+    "last cleanup",
+    "child cleanup",
+    "first cleanup",
+  ]);
+});
+
+test("owned resources can be added after disposal and dispose immediately", () => {
+  let ownLate!: (resources: readonly Array<(() => void) | { [Symbol.dispose](): void }>) => void;
+  const steps: string[] = [];
+
+  const Manager = defineManagedState(
+    (handle: StateHandle<{}>) => {
+      ownLate = handle.own;
+
+      return {
+        disposeLater() {
+          handle.own([
+            () => {
+              steps.push("late cleanup");
+            },
+          ]);
+        },
+      };
+    },
+    {},
+  );
+
+  const manager = new Manager();
+
+  manager.dispose();
+  ownLate([
+    {
+      [Symbol.dispose]() {
+        steps.push("late disposable");
+      },
+    },
+  ]);
+  manager.disposeLater();
+  manager[Symbol.dispose]();
+
+  assert.deepEqual(steps, ["late disposable", "late cleanup"]);
+});

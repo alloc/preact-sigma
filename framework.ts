@@ -12,6 +12,11 @@ import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 export { batch, computed, untracked } from "@preact/signals";
 
 type EventTypes = Record<string, [any?]>;
+type Cleanup = () => void;
+type Disposable = {
+  [Symbol.dispose](): void;
+};
+type OwnedResource = Cleanup | Disposable;
 
 type FilterProperties<T extends object, U> = {} & {
   [P in {
@@ -49,6 +54,8 @@ type AnyStateHandle<TState = any, TEvents extends EventTypes = any> = {
   peek: () => Immutable<TState>;
   /** Replace the base state, or update it with an Immer producer. */
   set: (value: TState | Producer<TState>) => void;
+  /** Attach cleanup functions or disposables to the managed state instance. */
+  own: (resources: readonly OwnedResource[]) => void;
   /**
    * Emit a custom event with zero or one argument.
    */
@@ -114,6 +121,9 @@ type AnyManagedState<TState = any, TEvents extends EventTypes = any> = {
     name: TEvent,
     listener: (...args: TEvents[TEvent]) => void,
   ): () => void;
+  /** Dispose this managed state instance and its owned resources. */
+  dispose(): void;
+  [Symbol.dispose](): void;
 };
 
 /**
@@ -262,13 +272,27 @@ export function defineManagedState<
 
   return class extends StateContainer {
     constructor(...params: TParams) {
+      let pendingOwned: OwnedResource[] | undefined;
+      let owner: StateContainer | undefined;
       const state = signal(initialState as Immutable<TState>);
-      const handle = createStateHandle<TState, TEvents>(state, (name, detail) =>
-        this.dispatchEvent(new CustomEvent(name, { detail })),
+      const handle = createStateHandle<TState, TEvents>(
+        state,
+        (resources) => {
+          if (owner) {
+            owner.own(resources);
+          } else {
+            if (resources.length === 0) {
+              return;
+            }
+            (pendingOwned ??= []).push(...resources);
+          }
+        },
+        (name, detail) => this.dispatchEvent(new CustomEvent(name, { detail })),
       );
 
       const props = constructor(handle, ...params);
-      super(state, handle, props);
+      super(state, handle, props, pendingOwned);
+      owner = this;
     }
   } as unknown as new (
     ...params: TParams
@@ -279,9 +303,17 @@ export function defineManagedState<
 class StateContainer extends EventTarget {
   private readonly _signals = new Map<string, ReadonlySignal>();
   private readonly _view = computed(() => ({ ...this }));
+  private _owned: OwnedResource[] | undefined;
+  private _disposed = false;
 
-  constructor(state: Signal, handle: AnyStateHandle, props: any) {
+  constructor(
+    state: Signal,
+    handle: AnyStateHandle,
+    props: any,
+    owned?: OwnedResource[],
+  ) {
     super();
+    this._owned = owned;
     const propDescriptors = Object.getOwnPropertyDescriptors(props);
     for (const key in propDescriptors) {
       const propDescriptor = propDescriptors[key];
@@ -357,6 +389,31 @@ class StateContainer extends EventTarget {
       this.removeEventListener(name, adapter);
     };
   }
+  own(resources: readonly OwnedResource[]) {
+    if (resources.length === 0) {
+      return;
+    }
+    if (this._disposed) {
+      disposeOwnedResources(resources);
+      return;
+    }
+    (this._owned ??= []).push(...resources);
+  }
+  dispose() {
+    if (this._disposed) {
+      return;
+    }
+    this._disposed = true;
+    const owned = this._owned;
+    this._owned = undefined;
+    if (!owned) {
+      return;
+    }
+    disposeOwnedResources(owned);
+  }
+  [Symbol.dispose]() {
+    this.dispose();
+  }
 }
 
 function isProducer<T>(value: T | Producer<T>): value is Producer<T> {
@@ -375,6 +432,7 @@ const lensKeys = new WeakMap<object, PropertyKey>();
 
 function createStateHandle<TState, TEvents extends EventTypes>(
   state: Signal<Immutable<TState>>,
+  own: (resources: readonly OwnedResource[]) => void,
   emit: (name: string, detail?: any) => any,
 ): StateHandle<TState, TEvents> {
   const handle: AnyStateHandle<TState, TEvents> = {
@@ -385,6 +443,7 @@ function createStateHandle<TState, TEvents extends EventTypes>(
         ? produce(state.value, update)
         : castImmutable(update);
     },
+    own,
     emit: emit as any,
   };
 
@@ -485,6 +544,26 @@ function getLensKey(value: unknown): PropertyKey | undefined {
     return undefined;
   }
   return lensKeys.get(value);
+}
+
+function disposeOwnedResources(resources: readonly OwnedResource[]) {
+  let errors: unknown[] | undefined;
+  for (let index = resources.length - 1; index >= 0; index -= 1) {
+    try {
+      const resource = resources[index];
+      if (typeof resource === "function") {
+        resource();
+      } else {
+        resource[Symbol.dispose]();
+      }
+    } catch (error) {
+      errors ||= [];
+      errors.push(error);
+    }
+  }
+  if (errors) {
+    throw new AggregateError(errors, "Failed to dispose one or more resources");
+  }
 }
 
 /**

@@ -86,6 +86,8 @@ const StatusManager = defineManagedState(
 
 const status = new StatusManager();
 const statusValue: "idle" | "busy" = status.status;
+const disposeStatus: () => void = status.dispose;
+const disposeSymbolStatus: () => void = status[Symbol.dispose];
 
 useManagedState(
   (search: StateHandle<{ query: string }>) => ({
@@ -117,6 +119,29 @@ useManagedState(
   () => ({ query: 123 }),
 );
 
+const OwningManager = defineManagedState(
+  (handle: StateHandle<{}>) => {
+    const child = new CounterManager();
+
+    handle.own([
+      () => {},
+      child,
+      {
+        [Symbol.dispose]() {},
+      },
+    ]);
+
+    return {
+      child,
+    };
+  },
+  {},
+);
+
+const owning = new OwningManager();
+owning.dispose();
+owning[Symbol.dispose]();
+
 void count;
 void ready;
 void childFromSnapshot;
@@ -126,3 +151,5 @@ void querySignal;
 void querySnapshot;
 void searchSnapshotSignal;
 void statusValue;
+void disposeStatus;
+void disposeSymbolStatus;
