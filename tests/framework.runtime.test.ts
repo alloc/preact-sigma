@@ -41,6 +41,46 @@ test("top-level lenses read tracked values and update shallow properties", () =>
   assert.equal(search.search.options.exact, true);
 });
 
+test("returned top-level lenses become reactive public properties", () => {
+  let searchHandle!: StateHandle<{
+    options: { exact: boolean };
+    query: string;
+  }>;
+
+  const SearchManager = defineManagedState(
+    (search: typeof searchHandle) => {
+      searchHandle = search;
+
+      return {
+        query: search.query,
+      };
+    },
+    { options: { exact: false }, query: "" },
+  );
+
+  const search = new SearchManager();
+  const upperQuery = computed(() => search.query.toUpperCase());
+  const observedQueries: string[] = [];
+  const stop = search.subscribe("query", (query) => {
+    observedQueries.push(query);
+  });
+
+  assert.equal(search.query, "");
+  assert.equal(search.peek("query"), "");
+  assert.equal(search.get("query")?.value, "");
+  assert.equal(upperQuery.value, "");
+
+  searchHandle.query.set("hello");
+
+  assert.equal(search.query, "hello");
+  assert.equal(search.peek("query"), "hello");
+  assert.equal(search.get("query")?.value, "hello");
+  assert.equal(upperQuery.value, "HELLO");
+  assert.deepEqual(observedQueries, ["", "hello"]);
+
+  stop();
+});
+
 test("composed managed states pass through unchanged", () => {
   const CounterManager = defineManagedState(
     (count: StateHandle<number>) => ({

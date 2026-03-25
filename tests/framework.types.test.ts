@@ -1,3 +1,5 @@
+import type { ReadonlySignal } from "@preact/signals";
+
 import {
   defineManagedState,
   type Lens,
@@ -17,6 +19,18 @@ type _primitiveHasNoLens = Assert<
   Equal<HasKey<StateHandle<number>, "query">, false>
 >;
 type _arrayHasNoLens = Assert<Equal<HasKey<StateHandle<string[]>, 0>, false>>;
+
+const SearchManager = defineManagedState(
+  (search: StateHandle<{ query: string }>) => ({
+    query: search.query,
+  }),
+  { query: "" },
+);
+
+const search = new SearchManager();
+const query: string = search.query;
+const querySignal: ReadonlySignal<string> = search.get("query");
+const querySnapshot: string = search.peek("query");
 
 const CounterManager = defineManagedState(
   (counter: StateHandle<{ count: number }>) => ({
@@ -54,5 +68,8 @@ const childFromSnapshot: typeof dashboard.child = dashboard.peek().child;
 void count;
 void ready;
 void childFromSnapshot;
+void query;
+void querySignal;
+void querySnapshot;
 
 dashboard.get("child");

@@ -70,8 +70,11 @@ type InferLenses<TState> =
 type InferState<TProps extends object> = {} & Immutable<{
   [K in keyof FilterProperties<
     TProps,
-    ReadonlySignal | AnyStateHandle
-  >]: TProps[K] extends ReadonlySignal<infer T> | AnyStateHandle<infer T>
+    ReadonlySignal | AnyStateHandle | Lens
+  >]: TProps[K] extends
+    | ReadonlySignal<infer T>
+    | AnyStateHandle<infer T>
+    | Lens<infer T>
     ? T
     : never;
 }> &
@@ -104,9 +107,9 @@ type AnyManagedState<TState = any, TEvents extends EventTypes = any> = {
 /**
  * Public instance shape produced by `defineManagedState()` and `useManagedState()`.
  *
- * Returned signals are exposed as tracked getter properties. Returning the
- * `StateHandle` itself exposes the base state directly as a reactive immutable
- * property.
+ * Returned signals and top-level lenses are exposed as tracked getter
+ * properties. Returning the `StateHandle` itself exposes the base state
+ * directly as a reactive immutable property.
  */
 export type ManagedState<
   TState,
@@ -155,8 +158,9 @@ export type StateHandle<
  * The first parameter should be explicitly typed as `StateHandle<...>`. The
  * library infers the internal state and event types from that parameter type.
  *
- * Return only methods, signals, the provided `StateHandle`, or a managed state
- * instance. Returned signals become tracked getter properties, returning the
+ * Return only methods, signals, top-level `Lens` values from the provided
+ * `StateHandle`, the provided `StateHandle`, or a managed state instance.
+ * Returned signals and lenses become tracked getter properties, returning the
  * handle exposes the base state directly as a reactive immutable property, and
  * managed state instances are passed through unchanged.
  */
@@ -172,6 +176,7 @@ export type StateConstructor<
   [key: string]:
     | ((...args: any[]) => any)
     | AnyManagedState
+    | Lens
     | ReadonlySignal
     | AnyStateHandle;
 };
@@ -191,11 +196,12 @@ export type StateConstructor<
  * The state constructor must return an object with properties that are either:
  * - A function (to expose methods)
  * - A signal (to expose derived state)
+ * - A top-level lens from the state handle (to expose one reactive property)
  * - The state handle (to expose the reactive immutable base state directly)
  * - A managed state instance (to compose another managed state as a property)
  *
- * Returned signals are turned into getter properties, so reads are tracked by
- * the `@preact/signals` runtime.
+ * Returned signals and top-level lenses are turned into getter properties, so
+ * reads are tracked by the `@preact/signals` runtime.
  *
  * Events can carry at most one argument.
  *
@@ -230,17 +236,11 @@ export function defineManagedState<
 
 /** @internal */
 class StateContainer extends EventTarget {
-  private readonly _state: Signal;
-  private readonly _handle: AnyStateHandle;
-  private readonly _props: any;
+  private readonly _signals = new Map<string, ReadonlySignal>();
   private readonly _view = computed(() => ({ ...this }));
 
   constructor(state: Signal, handle: AnyStateHandle, props: any) {
     super();
-    this._state = state;
-    this._handle = handle;
-    this._props = props;
-
     const propDescriptors = Object.getOwnPropertyDescriptors(props);
     for (const key in propDescriptors) {
       const propDescriptor = propDescriptors[key];
@@ -252,12 +252,11 @@ class StateContainer extends EventTarget {
           });
           continue;
         }
-        if (value === handle) {
-          value = state;
-        }
-        if (value instanceof Signal) {
+        const signal = getExposedSignal(value, state, handle);
+        if (signal) {
+          this._signals.set(key, signal);
           Object.defineProperty(this, key, {
-            get: () => value.value,
+            get: () => signal.value,
             enumerable: true,
           });
         } else if (isManagedState(value)) {
@@ -267,7 +266,7 @@ class StateContainer extends EventTarget {
           });
         } else {
           throw new Error(
-            `Invalid property: ${key}. Must be a function, a signal, the state handle, or a managed state.`,
+            `Invalid property: ${key}. Must be a function, a signal, a top-level lens, the state handle, or a managed state.`,
           );
         }
       } else {
@@ -279,20 +278,12 @@ class StateContainer extends EventTarget {
     if (!key) {
       return this._view;
     }
-    const prop = this._props[key];
-    return prop instanceof Signal
-      ? prop
-      : prop === this._handle
-        ? this._state
-        : undefined;
+    return this._signals.get(key);
   }
   peek(key?: string) {
-    if (!key) {
-      return this._view.peek();
-    }
     const signal = this.get(key);
     if (!signal) {
-      throw new Error(`Property ${key} is not a signal`);
+      return undefined;
     }
     return signal.peek();
   }
@@ -331,6 +322,8 @@ function isProducer<T>(value: T | Producer<T>): value is Producer<T> {
   return typeof value === "function";
 }
 
+const lensKeys = new WeakMap<object, PropertyKey>();
+
 function createStateHandle<TState, TEvents extends EventTypes>(
   state: Signal<Immutable<TState>>,
   emit: (name: string, detail?: any) => any,
@@ -368,6 +361,7 @@ function createStateHandle<TState, TEvents extends EventTypes>(
             }) as unknown as Producer<TState>);
           },
         };
+        lensKeys.set(lens, key);
         lenses.set(key, lens);
       }
       return lens;
@@ -383,6 +377,32 @@ function isLensableState(
   }
   const prototype = Object.getPrototypeOf(value);
   return prototype === Object.prototype || prototype === null;
+}
+
+function getExposedSignal(
+  value: unknown,
+  state: Signal,
+  handle: AnyStateHandle,
+): ReadonlySignal | undefined {
+  if (value === handle) {
+    return state;
+  }
+  if (value instanceof Signal) {
+    return value;
+  }
+  const lensKey = getLensKey(value);
+  if (lensKey !== undefined) {
+    return computed(
+      () => (state.value as Record<PropertyKey, unknown>)[lensKey],
+    );
+  }
+}
+
+function getLensKey(value: unknown): PropertyKey | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  return lensKeys.get(value);
 }
 
 /**
