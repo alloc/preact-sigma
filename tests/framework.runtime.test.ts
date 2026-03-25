@@ -82,6 +82,40 @@ test("returned top-level lenses become reactive public properties", () => {
   stop();
 });
 
+test("subscriptions emit the current value immediately", () => {
+  const CounterManager = defineManagedState(
+    (counter: StateHandle<{ count: number }>) => ({
+      count: counter.count,
+      increment() {
+        counter.count.set((value) => value + 1);
+      },
+    }),
+    { count: 0 },
+  );
+
+  const counter = new CounterManager();
+  const observedCounts: number[] = [];
+  const observedSnapshots: number[] = [];
+
+  const stopCount = counter.subscribe("count", (count) => {
+    observedCounts.push(count);
+  });
+  const stopState = counter.subscribe((value) => {
+    observedSnapshots.push(value.count);
+  });
+
+  assert.deepEqual(observedCounts, [0]);
+  assert.deepEqual(observedSnapshots, [0]);
+
+  counter.increment();
+
+  assert.deepEqual(observedCounts, [0, 1]);
+  assert.deepEqual(observedSnapshots, [0, 1]);
+
+  stopCount();
+  stopState();
+});
+
 test("spreading a state handle exposes top-level lenses without handle methods", () => {
   let searchHandle!: StateHandle<{
     options: { exact: boolean };

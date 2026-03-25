@@ -67,6 +67,10 @@ type InferLenses<TState> =
       : { readonly [K in keyof T]: Lens<T[K]> }
     : {};
 
+type OmitManagedStates<TState> = TState extends object
+  ? Omit<TState, keyof InferManagedStates<TState>>
+  : TState;
+
 type InferState<TProps extends object> = {} & Immutable<{
   [K in keyof FilterProperties<
     TProps,
@@ -81,17 +85,25 @@ type InferState<TProps extends object> = {} & Immutable<{
   Readonly<InferManagedStates<TProps>>;
 
 type AnyManagedState<TState = any, TEvents extends EventTypes = any> = {
-  /** Get the underlying signal for an exposed signal or base-state property. */
-  get<K extends keyof TState>(key: K): ReadonlySignal<TState[K]>;
+  /** Get the underlying signal for an exposed signal-backed public property. */
+  get<K extends keyof OmitManagedStates<TState>>(
+    key: K,
+  ): ReadonlySignal<OmitManagedStates<TState>[K]>;
   get(): ReadonlySignal<TState>;
   /** Read the current immutable public state snapshot without tracking. */
-  peek<K extends keyof TState>(key: K): TState[K];
-  peek(): TState;
-  /** Subscribe to future immutable state snapshots. Returns a function to unsubscribe. */
-  subscribe<K extends keyof TState>(
+  peek<K extends keyof OmitManagedStates<TState>>(
     key: K,
-    listener: (value: TState[K]) => void,
+  ): OmitManagedStates<TState>[K];
+  peek(): TState;
+  /**
+   * Subscribe to the current and future immutable values of one signal-backed
+   * public property. Returns a function to unsubscribe.
+   */
+  subscribe<K extends keyof OmitManagedStates<TState>>(
+    key: K,
+    listener: (value: OmitManagedStates<TState>[K]) => void,
   ): () => void;
+  /** Subscribe to the current and future immutable public state snapshots. */
   subscribe(listener: (value: TState) => void): () => void;
   /**
    * Subscribe to a custom event emitted by this managed state.
@@ -124,9 +136,11 @@ const queryMethods = new WeakSet<(...args: any[]) => any>();
  *
  * Query methods wrap their body in `computed()`, so reads inside the method
  * participate in signal tracking even after the method is exposed publicly.
- * Tagged query methods also skip the default `action()` wrapping step.
+ * Query functions read from closed-over handles or signals and do not use an
+ * instance receiver. Tagged query methods also skip the default `action()`
+ * wrapping step.
  */
-export function query<TFunction extends (...args: any[]) => any>(
+export function query<TFunction extends (this: void, ...args: any[]) => any>(
   fn: TFunction,
 ): TFunction {
   const wrapped = ((...args: Parameters<TFunction>) =>
@@ -239,7 +253,7 @@ export function defineManagedState<
   TEvents extends EventTypes,
   TParams extends any[],
   TProps extends object = {},
-  TInitialState = TState,
+  TInitialState extends TState = TState,
 >(
   constructor: StateConstructor<TState, TEvents, TParams, TProps>,
   initialState: TInitialState,
@@ -485,7 +499,7 @@ export function useManagedState<
   TState,
   TEvents extends EventTypes,
   TProps extends object = {},
-  TInitialState = TState,
+  TInitialState extends TState = TState,
 >(
   constructor: StateConstructor<TState, TEvents, [], TProps>,
   initialState: TInitialState | (() => TInitialState),
@@ -514,7 +528,8 @@ export type SubscribeTarget<T> = {
  * Subscribe to future values from a subscribable source inside `useEffect`.
  *
  * The listener is kept fresh automatically, so a dependency array is not part
- * of this API. Pass `null` to disable the subscription temporarily.
+ * of this API. The listener receives the current value immediately and then
+ * future updates. Pass `null` to disable the subscription temporarily.
  */
 export function useSubscribe<T>(
   target: SubscribeTarget<T> | null,
@@ -525,7 +540,7 @@ export function useSubscribe<T>(
 }
 
 type InferEvent<T extends EventTarget | AnyManagedState> =
-  T extends AnyManagedState<{}, infer TEvents extends EventTypes>
+  T extends AnyManagedState<any, infer TEvents extends EventTypes>
     ? string & keyof TEvents
     : T extends { addEventListener: (name: infer TEvent) => any }
       ? string & TEvent
@@ -535,7 +550,7 @@ type InferEventListener<
   T extends EventTarget | AnyManagedState,
   TEvent extends string = any,
 > =
-  T extends AnyManagedState<{}, infer TEvents extends EventTypes>
+  T extends AnyManagedState<any, infer TEvents extends EventTypes>
     ? TEvent extends string & keyof TEvents
       ? (...args: TEvents[TEvent]) => void
       : never

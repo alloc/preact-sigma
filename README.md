@@ -116,6 +116,8 @@ new Counter().doubled;
 ## Create A Tracked Query Method
 
 Use `query()` when you want a public method whose reads stay tracked.
+Query functions read from closed-over handles or signals and do not use
+instance `this`.
 
 ```ts
 import { defineManagedState, query, type StateHandle } from "preact-sigma";
@@ -207,6 +209,7 @@ search.page;
 ## Compose Managed States
 
 Return another managed-state instance when you want to expose it unchanged as a property.
+Composed managed states are available through direct property access and whole-state snapshots.
 
 ```ts
 import { defineManagedState, type StateHandle } from "preact-sigma";
@@ -309,7 +312,7 @@ stopSelected();
 
 ## Read Signals From A Managed State
 
-Use `.get(key)` for one exposed property or `.get()` for the whole public state signal.
+Use `.get(key)` for one exposed signal-backed property or `.get()` for the whole public state signal.
 
 ```ts
 const counter = new Counter();
@@ -323,7 +326,7 @@ counterSignal.value.count;
 
 ## Peek At Public State
 
-Use `.peek(key)` for one exposed property or `.peek()` for the whole public snapshot.
+Use `.peek(key)` for one exposed signal-backed property or `.peek()` for the whole public snapshot.
 
 ```ts
 const counter = new Counter();
@@ -334,7 +337,8 @@ counter.peek();
 
 ## Subscribe To Public State
 
-Use `.subscribe(key, listener)` for one exposed property or `.subscribe(listener)` for the whole public state.
+Use `.subscribe(key, listener)` for one exposed signal-backed property or `.subscribe(listener)` for the whole public state.
+Listeners receive the current value immediately and then future updates.
 
 ```ts
 const counter = new Counter();
@@ -385,6 +389,7 @@ function SearchBox() {
 ## Subscribe In `useEffect`
 
 Use `useSubscribe()` with any subscribable source, including managed state and Preact signals.
+The listener receives the current value immediately and then future updates.
 
 ```tsx
 import { useSubscribe } from "preact-sigma";
