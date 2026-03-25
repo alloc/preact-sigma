@@ -22,3 +22,5 @@ This file captures general guidance for writing product or library READMEs.
 - When introducing a concept, give it its own short paragraph and its own example snippet.
 - Keep snippets minimal by default.
 - Reserve larger snippets for big-picture, end-to-end examples.
+- Follow big-picture snippets with a short bulleted list that explains potentially confusing details without drifting into low-level minutiae.
+- When an API returns an unsubscribe or cleanup function, demonstrate that return value in the example snippet so its purpose is obvious.

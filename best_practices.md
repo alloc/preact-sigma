@@ -80,6 +80,25 @@ const Search = defineManagedState(
 
 Return the top-level lens itself when one public field should stay reactive without exposing the whole base state.
 
+Spread an object-shaped handle into the returned object when the public managed state should mirror the base state's top-level shape.
+
+```ts
+type SearchState = {
+  page: number;
+  query: string;
+};
+
+const Search = defineManagedState(
+  (search: StateHandle<SearchState>) => ({
+    ...search,
+    nextPage() {
+      search.page.set((page) => page + 1);
+    },
+  }),
+  { page: 1, query: "" },
+);
+```
+
 ## Use `query()` For Tracked Public Reads
 
 Returned methods are action-wrapped by default. When a public method is conceptually a read, tag it with `query()` so its body participates in signal tracking.

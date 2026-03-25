@@ -40,15 +40,20 @@ const Counter = defineManagedState(
 );
 
 const counter = new Counter(2);
+const stopThreshold = counter.on("thresholdReached", (event) => {
+  console.log(event.count);
+});
 
 counter.count;
 counter.doubled;
 counter.increment();
-
-counter.on("thresholdReached", (event) => {
-  console.log(event.count);
-});
+stopThreshold();
 ```
+
+- `count: counter` exposes the base state as a reactive immutable property.
+- `doubled` is a memoized reactive value exposed through `computed()`.
+- `increment()` is action-wrapped automatically, so the state update is batched and untracked.
+- `counter.on(...)` returns `stopThreshold`, which unsubscribes the event listener.
 
 ## Define Reusable State
 
@@ -171,6 +176,34 @@ const Search = defineManagedState(
 new Search().query;
 ```
 
+## Spread A Handle To Expose Top-Level Properties
+
+When the base state is object-shaped, spread the handle into the returned object to expose its current top-level lenses at once.
+
+```ts
+import { defineManagedState, type StateHandle } from "preact-sigma";
+
+type SearchState = {
+  page: number;
+  query: string;
+};
+
+const Search = defineManagedState(
+  (search: StateHandle<SearchState>) => ({
+    ...search,
+    nextPage() {
+      search.page.set((page) => page + 1);
+    },
+  }),
+  { page: 1, query: "" }
+);
+
+const search = new Search();
+
+search.query;
+search.page;
+```
+
 ## Compose Managed States
 
 Return another managed-state instance when you want to expose it unchanged as a property.
@@ -262,13 +295,16 @@ Use `.on()` to subscribe to custom events from a managed state instance.
 ```ts
 const todo = new Todo();
 
-todo.on("saved", () => {
+const stopSaved = todo.on("saved", () => {
   console.log("saved");
 });
 
-todo.on("selected", (event) => {
+const stopSelected = todo.on("selected", (event) => {
   console.log(event.id);
 });
+
+stopSaved();
+stopSelected();
 ```
 
 ## Read Signals From A Managed State
@@ -310,6 +346,9 @@ const stopCount = counter.subscribe("count", (count) => {
 const stopState = counter.subscribe((value) => {
   console.log(value.count);
 });
+
+stopCount();
+stopState();
 ```
 
 ## Use It Inside A Component
