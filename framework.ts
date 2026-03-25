@@ -12,7 +12,6 @@ import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 export { batch, computed, untracked } from "@preact/signals";
 
 type EventTypes = Record<string, [any?]>;
-const queryMethods = new WeakSet<(...args: any[]) => any>();
 
 type FilterProperties<T extends object, U> = {} & {
   [P in {
@@ -117,6 +116,8 @@ export type ManagedState<
   TEvents extends EventTypes = EventTypes,
   TProps extends object = Record<string, unknown>,
 > = AnyManagedState<TState, TEvents> & Immutable<TState> & TProps;
+
+const queryMethods = new WeakSet<(...args: any[]) => any>();
 
 /**
  * Mark a constructor-returned method as a tracked query.
