@@ -6,3 +6,8 @@
 - When a returned value becomes a public reactive property, say that explicitly.
 - Call out especially useful behavior when it clarifies intent, particularly for nested or non-obvious use cases.
 - Keep AI-specific authoring conventions, naming guidance, and other best-practice material out of the public API surface.
+
+# Agent Maintenance
+
+- When the user corrects the agent on a general style or discipline preference, and the correction is not domain-specific or overly specific, add that guidance to `AGENTS.md` so it applies going forward.
+- Keep that `AGENTS.md` update in a separate commit from other work.
