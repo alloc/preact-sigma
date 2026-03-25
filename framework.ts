@@ -341,6 +341,14 @@ function isProducer<T>(value: T | Producer<T>): value is Producer<T> {
   return typeof value === "function";
 }
 
+function makeNonEnumerable(object: object, keys: string[]) {
+  for (const key of keys)
+    Object.defineProperty(object, key, {
+      ...Object.getOwnPropertyDescriptor(object, key),
+      enumerable: false,
+    });
+}
+
 const lensKeys = new WeakMap<object, PropertyKey>();
 
 function createStateHandle<TState, TEvents extends EventTypes>(
@@ -357,33 +365,66 @@ function createStateHandle<TState, TEvents extends EventTypes>(
     },
     emit: emit as any,
   };
+
+  // Hide methods to allow spreading the handle into the public state object.
+  makeNonEnumerable(handle, Object.keys(handle));
+
   const lenses = new Map<PropertyKey, Lens>();
+  const getLensDescriptor = (key: PropertyKey) => {
+    const currentState = state.value;
+    if (!isLensableState(currentState)) {
+      return undefined;
+    }
+    return Reflect.getOwnPropertyDescriptor(currentState, key);
+  };
+  const getLens = (key: PropertyKey) => {
+    let lens = lenses.get(key);
+    if (!lens) {
+      lens = {
+        get: () => (handle.get() as any)[key],
+        set: (update) => {
+          handle.set((draft: any) => {
+            draft[key] = isProducer(update)
+              ? produce(draft[key], update)
+              : update;
+          });
+        },
+      };
+      lensKeys.set(lens, key);
+      lenses.set(key, lens);
+    }
+    return lens;
+  };
 
   return new Proxy(handle, {
     get(target, key, receiver) {
       if (Reflect.has(target, key)) {
         return Reflect.get(target, key, receiver);
       }
-      const currentState = state.value;
-      if (!isLensableState(currentState) || !(key in currentState)) {
+      if (!getLensDescriptor(key)) {
         return undefined;
       }
-      let lens = lenses.get(key);
-      if (!lens) {
-        lens = {
-          get: () => (handle.get() as Record<PropertyKey, unknown>)[key],
-          set: (update) => {
-            handle.set(((draft: Record<PropertyKey, unknown>) => {
-              draft[key] = isProducer(update)
-                ? produce(draft[key], update as Producer<unknown>)
-                : update;
-            }) as unknown as Producer<TState>);
-          },
-        };
-        lensKeys.set(lens, key);
-        lenses.set(key, lens);
+      return getLens(key);
+    },
+    // For spreading the state handle, we only expose the lens keys.
+    ownKeys(_target) {
+      const currentState = state.value;
+      if (!isLensableState(currentState)) {
+        return [];
       }
-      return lens;
+      return Reflect.ownKeys(currentState);
+    },
+    getOwnPropertyDescriptor(_target, key) {
+      const lensDescriptor = getLensDescriptor(key);
+      if (!lensDescriptor) {
+        return undefined;
+      }
+      return {
+        configurable: true,
+        enumerable: lensDescriptor.enumerable,
+        value: getLens(key),
+        writable: false,
+      };
     },
   }) as StateHandle<TState, TEvents>;
 }

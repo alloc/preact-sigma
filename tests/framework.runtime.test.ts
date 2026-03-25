@@ -82,6 +82,38 @@ test("returned top-level lenses become reactive public properties", () => {
   stop();
 });
 
+test("spreading a state handle exposes top-level lenses without handle methods", () => {
+  let searchHandle!: StateHandle<{
+    options: { exact: boolean };
+    query: string;
+  }>;
+
+  const SearchManager = defineManagedState(
+    (search: typeof searchHandle) => {
+      searchHandle = search;
+
+      return {
+        ...search,
+      };
+    },
+    { options: { exact: false }, query: "" },
+  );
+
+  const search = new SearchManager();
+
+  assert.equal(search.query, "");
+  assert.equal(search.options.exact, false);
+  assert.equal(Object.hasOwn(search, "set"), false);
+
+  searchHandle.query.set("hello");
+  searchHandle.options.set((options) => {
+    options.exact = true;
+  });
+
+  assert.equal(search.query, "hello");
+  assert.equal(search.options.exact, true);
+});
+
 test("composed managed states pass through unchanged", () => {
   const CounterManager = defineManagedState(
     (count: StateHandle<number>) => ({

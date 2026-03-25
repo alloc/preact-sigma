@@ -33,7 +33,7 @@ const SearchManager = defineManagedState(
 );
 
 const search = new SearchManager();
-const query: string = search.query;
+const queryValue: string = search.query;
 const querySignal: ReadonlySignal<string> = search.get("query");
 const querySnapshot: string = search.peek("query");
 
@@ -73,7 +73,7 @@ const childFromSnapshot: typeof dashboard.child = dashboard.peek().child;
 void count;
 void ready;
 void childFromSnapshot;
-void query;
+void queryValue;
 void querySignal;
 void querySnapshot;
 
