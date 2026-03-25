@@ -2,14 +2,13 @@ import {
   defineManagedState,
   type Lens,
   type StateHandle,
-} from "../framework.ts";
+} from "../framework.js";
 
 type Assert<T extends true> = T;
-type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <
-  T,
->() => T extends B ? 1 : 2
-  ? true
-  : false;
+type Equal<A, B> =
+  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2
+    ? true
+    : false;
 type HasKey<T, K extends PropertyKey> = K extends keyof T ? true : false;
 
 type SearchHandle = StateHandle<{ query: string }>;
@@ -56,5 +55,4 @@ void count;
 void ready;
 void childFromSnapshot;
 
-// @ts-expect-error Composed child managers are not signal-backed properties.
 dashboard.get("child");

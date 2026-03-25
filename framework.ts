@@ -67,28 +67,29 @@ type InferLenses<TState> =
       : { readonly [K in keyof T]: Lens<T[K]> }
     : {};
 
-type InferState<TProps extends object> = {} & {
+type InferState<TProps extends object> = {} & Immutable<{
   [K in keyof FilterProperties<
     TProps,
     ReadonlySignal | AnyStateHandle
   >]: TProps[K] extends ReadonlySignal<infer T> | AnyStateHandle<infer T>
     ? T
     : never;
-};
+}> &
+  Readonly<InferManagedStates<TProps>>;
 
 type AnyManagedState<TState = any, TEvents extends EventTypes = any> = {
   /** Get the underlying signal for an exposed signal or base-state property. */
-  get<K extends keyof TState>(key: K): ReadonlySignal<Immutable<TState[K]>>;
-  get(): ReadonlySignal<Immutable<TState>>;
+  get<K extends keyof TState>(key: K): ReadonlySignal<TState[K]>;
+  get(): ReadonlySignal<TState>;
   /** Read the current immutable public state snapshot without tracking. */
-  peek<K extends keyof TState>(key: K): Immutable<TState[K]>;
-  peek(): Immutable<TState>;
+  peek<K extends keyof TState>(key: K): TState[K];
+  peek(): TState;
   /** Subscribe to future immutable state snapshots. Returns a function to unsubscribe. */
   subscribe<K extends keyof TState>(
     key: K,
-    listener: (value: Immutable<TState[K]>) => void,
+    listener: (value: TState[K]) => void,
   ): () => void;
-  subscribe(listener: (value: Immutable<TState>) => void): () => void;
+  subscribe(listener: (value: TState) => void): () => void;
   /**
    * Subscribe to a custom event emitted by this managed state.
    *

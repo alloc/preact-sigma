@@ -4,5 +4,6 @@
     "lib": ["dom", "esnext"],
     "target": "esnext",
     "module": "esnext"
-  }
+  },
+  "references": [{ "path": "./tsconfig.framework-tests.json" }]
 }

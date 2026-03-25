@@ -6,7 +6,7 @@ import {
   defineManagedState,
   isManagedState,
   type StateHandle,
-} from "../framework.ts";
+} from "../framework.js";
 
 test("top-level lenses read tracked values and update shallow properties", () => {
   let searchHandle!: StateHandle<{
