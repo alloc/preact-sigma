@@ -78,6 +78,56 @@ Use `computed()` only when you specifically need a memoized reactive value for p
 const visibleTodos = computed(() => getVisibleTodos(todoList.get()));
 ```
 
+## Use Top-Level Lenses For Top-Level Fields
+
+When the base state is object-shaped, prefer the handle's top-level lenses for constructor-local reads and writes to individual fields.
+
+That keeps simple field access terse and avoids repeating object spreads or selector boilerplate inside actions.
+
+```ts
+type SearchState = {
+  query: string;
+};
+
+const SearchManager = defineManagedState(
+  (search: StateHandle<SearchState>) => ({
+    setQuery(query: string) {
+      search.query.set(query);
+    },
+    clearQuery() {
+      search.query.set("");
+    },
+  }),
+  { query: "" },
+);
+```
+
+## Compose Managers At Feature Boundaries
+
+When a nested feature already has a clean public API, prefer returning that managed state instance instead of flattening both concerns into one larger model.
+
+That keeps each managed state focused and lets callers work with the nested feature through its own methods and reactive properties.
+
+```ts
+const CounterManager = defineManagedState(
+  (count: StateHandle<number>) => ({
+    count,
+    increment() {
+      count.set((value) => value + 1);
+    },
+  }),
+  0,
+);
+
+const DashboardManager = defineManagedState(
+  (dashboard: StateHandle<{ ready: boolean }>) => ({
+    dashboard,
+    counter: new CounterManager(),
+  }),
+  { ready: false },
+);
+```
+
 ## Keep Public Actions Domain-Specific
 
 Public actions should represent meaningful domain actions, not low-level mutations.
