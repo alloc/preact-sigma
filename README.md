@@ -241,6 +241,37 @@ const Dashboard = defineManagedState(
 new Dashboard().counter.increment();
 ```
 
+## Own Resources And Dispose The Instance
+
+Use `handle.own()` to register cleanup functions or disposables, and call `.dispose()` when the managed state should release them.
+
+```ts
+import { defineManagedState, type StateHandle } from "preact-sigma";
+
+type PollerState = {
+  ticks: number;
+};
+
+const Poller = defineManagedState(
+  (poller: StateHandle<PollerState>) => ({
+    ticks: poller.ticks,
+    start() {
+      const interval = window.setInterval(() => {
+        poller.ticks.set((ticks) => ticks + 1);
+      }, 1000);
+
+      poller.own([() => window.clearInterval(interval)]);
+    },
+  }),
+  { ticks: 0 }
+);
+
+const poller = new Poller();
+
+poller.start();
+poller.dispose();
+```
+
 ## Update State
 
 Pass an Immer producer to `.set()` when your base state is object-shaped.
@@ -313,6 +344,7 @@ stopSelected();
 ## Read Signals From A Managed State
 
 Use `.get(key)` for one exposed signal-backed property or `.get()` for the whole public state signal.
+Keyed reads do not target composed managed-state properties.
 
 ```ts
 const counter = new Counter();
@@ -327,6 +359,7 @@ counterSignal.value.count;
 ## Peek At Public State
 
 Use `.peek(key)` for one exposed signal-backed property or `.peek()` for the whole public snapshot.
+Keyed peeks do not target composed managed-state properties.
 
 ```ts
 const counter = new Counter();
@@ -339,6 +372,7 @@ counter.peek();
 
 Use `.subscribe(key, listener)` for one exposed signal-backed property or `.subscribe(listener)` for the whole public state.
 Listeners receive the current value immediately and then future updates.
+Keyed subscriptions do not target composed managed-state properties.
 
 ```ts
 const counter = new Counter();

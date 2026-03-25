@@ -230,11 +230,9 @@ test("owned resources are disposed in reverse order and aggregate errors", () =>
 
   const ChildManager = defineManagedState(
     (child: StateHandle<number>) => {
-      child.own([
-        () => {
-          steps.push("child cleanup");
-        },
-      ]);
+      child.own(() => {
+        steps.push("child cleanup");
+      });
 
       return {
         child,
@@ -294,7 +292,12 @@ test("owned resources are disposed in reverse order and aggregate errors", () =>
 });
 
 test("owned resources can be added after disposal and dispose immediately", () => {
-  let ownLate!: (resources: readonly Array<(() => void) | { [Symbol.dispose](): void }>) => void;
+  let ownLate!: (
+    resources:
+      | (() => void)
+      | { [Symbol.dispose](): void }
+      | readonly Array<(() => void) | { [Symbol.dispose](): void }>,
+  ) => void;
   const steps: string[] = [];
 
   const Manager = defineManagedState(
@@ -317,15 +320,42 @@ test("owned resources can be added after disposal and dispose immediately", () =
   const manager = new Manager();
 
   manager.dispose();
+  ownLate({
+    [Symbol.dispose]() {
+      steps.push("late disposable");
+    },
+  });
   ownLate([
+    () => {
+      steps.push("late array cleanup");
+    },
     {
       [Symbol.dispose]() {
-        steps.push("late disposable");
+        steps.push("late array disposable");
       },
     },
   ]);
   manager.disposeLater();
   manager[Symbol.dispose]();
 
-  assert.deepEqual(steps, ["late disposable", "late cleanup"]);
+  assert.deepEqual(steps, [
+    "late disposable",
+    "late array disposable",
+    "late array cleanup",
+    "late cleanup",
+  ]);
+});
+
+test("managed state instances do not expose own", () => {
+  const Manager = defineManagedState(
+    (handle: StateHandle<{ ready: boolean }>) => ({
+      ready: handle.ready,
+    }),
+    { ready: false },
+  );
+
+  const manager = new Manager();
+
+  assert.equal("own" in manager, false);
+  assert.equal((manager as { own?: unknown }).own, undefined);
 });

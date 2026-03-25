@@ -1,6 +1,6 @@
 # Agent README Prompt
 
-Use this prompt when refreshing README-style documentation and related best-practices docs from an API declaration file.
+Use this prompt when refreshing README-style documentation, `llms.txt`, and related best-practices docs from an API declaration file.
 
 ## Prompt
 
@@ -9,7 +9,7 @@ You are updating documentation from the current API declaration file.
 Follow this workflow exactly:
 
 1. Re-read the declaration file first and treat it as the only source of truth for API behavior and exported surface unless explicitly told otherwise.
-2. Re-read the existing README and the existing best-practices document before editing anything.
+2. Re-read the existing README, `llms.txt`, and the existing best-practices document before editing anything.
 3. Regenerate only the parts that changed. Do not rewrite stable sections just for style.
 4. Keep the README usage-first:
    - show public behavior, not internals
@@ -20,13 +20,18 @@ Follow this workflow exactly:
 5. Keep the best-practices doc convention-first:
    - capture naming, inference, structure, and design guidance
    - do not turn it into an API reference
-6. When the declaration file adds or changes public capabilities, document each new capability in at least one of the two docs.
-7. When examples depend on signatures or inference behavior, make them match the declaration file exactly.
-8. When an API returns an unsubscribe or cleanup function, show that return value in the example and make it clear that it is used to unsubscribe.
-9. After editing, re-read the updated docs against the declaration file and spot-check that:
+6. Keep `llms.txt` precise and exhaustive:
+   - start with a glossary for repo-specific terminology
+   - cover concepts, supported features, and best practices without ambiguity
+   - update it whenever the README workflow changes the documented public surface
+7. When the declaration file adds or changes public capabilities, document each new capability in at least one of the docs and update `llms.txt` to match.
+8. When examples depend on signatures or inference behavior, make them match the declaration file exactly.
+9. When an API returns an unsubscribe or cleanup function, show that return value in the example and make it clear that it is used to unsubscribe.
+10. After editing, re-read the updated docs against the declaration file and spot-check that:
    - examples use supported exports and signatures
    - README does not duplicate best-practices guidance
    - changed API behavior is reflected accurately
+   - `llms.txt` matches the current declarations and doc guidance
 
 ## Output Expectations
 

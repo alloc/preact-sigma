@@ -123,6 +123,11 @@ const OwningManager = defineManagedState(
   (handle: StateHandle<{}>) => {
     const child = new CounterManager();
 
+    handle.own(() => {});
+    handle.own(child);
+    handle.own({
+      [Symbol.dispose]() {},
+    });
     handle.own([
       () => {},
       child,

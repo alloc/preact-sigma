@@ -17,6 +17,7 @@ type Disposable = {
   [Symbol.dispose](): void;
 };
 type OwnedResource = Cleanup | Disposable;
+type OwnedResources = OwnedResource | readonly OwnedResource[];
 
 type FilterProperties<T extends object, U> = {} & {
   [P in {
@@ -46,26 +47,6 @@ type OnlyPlainObject<TState> = TState extends object
     ? never
     : TState
   : never;
-
-type AnyStateHandle<TState = any, TEvents extends EventTypes = any> = {
-  /** Read the current immutable base state. This read is tracked. */
-  get: () => Immutable<TState>;
-  /** Read the current immutable base state snapshot without tracking. */
-  peek: () => Immutable<TState>;
-  /** Replace the base state, or update it with an Immer producer. */
-  set: (value: TState | Producer<TState>) => void;
-  /** Attach cleanup functions or disposables to the managed state instance. */
-  own: (resources: readonly OwnedResource[]) => void;
-  /**
-   * Emit a custom event with zero or one argument.
-   */
-  emit: [TEvents] extends [{}]
-    ? <TEvent extends string & keyof TEvents>(
-        name: TEvent,
-        ...args: TEvents[TEvent]
-      ) => void
-    : never;
-};
 
 type InferLenses<TState> =
   OnlyPlainObject<TState> extends infer T
@@ -272,27 +253,42 @@ export function defineManagedState<
 
   return class extends StateContainer {
     constructor(...params: TParams) {
-      let pendingOwned: OwnedResource[] | undefined;
-      let owner: StateContainer | undefined;
       const state = signal(initialState as Immutable<TState>);
+
+      let owned: OwnedResource[] | undefined;
+      let disposed = false;
+
+      const dispose = () => {
+        if (disposed) {
+          return;
+        }
+        disposed = true;
+        const current = owned;
+        owned = undefined;
+        if (!current) {
+          return;
+        }
+        disposeOwnedResources(current);
+      };
+
       const handle = createStateHandle<TState, TEvents>(
         state,
+        (name, detail) => this.dispatchEvent(new CustomEvent(name, { detail })),
         (resources) => {
-          if (owner) {
-            owner.own(resources);
+          resources = toOwnedResources(resources);
+          if (!resources.length) {
+            return;
+          }
+          if (disposed) {
+            disposeOwnedResources(resources);
           } else {
-            if (resources.length === 0) {
-              return;
-            }
-            (pendingOwned ??= []).push(...resources);
+            (owned ??= []).push(...resources);
           }
         },
-        (name, detail) => this.dispatchEvent(new CustomEvent(name, { detail })),
       );
 
       const props = constructor(handle, ...params);
-      super(state, handle, props, pendingOwned);
-      owner = this;
+      super(state, handle, props, dispose);
     }
   } as unknown as new (
     ...params: TParams
@@ -303,17 +299,14 @@ export function defineManagedState<
 class StateContainer extends EventTarget {
   private readonly _signals = new Map<string, ReadonlySignal>();
   private readonly _view = computed(() => ({ ...this }));
-  private _owned: OwnedResource[] | undefined;
-  private _disposed = false;
 
   constructor(
     state: Signal,
     handle: AnyStateHandle,
     props: any,
-    owned?: OwnedResource[],
+    readonly dispose: () => void,
   ) {
     super();
-    this._owned = owned;
     const propDescriptors = Object.getOwnPropertyDescriptors(props);
     for (const key in propDescriptors) {
       const propDescriptor = propDescriptors[key];
@@ -389,28 +382,6 @@ class StateContainer extends EventTarget {
       this.removeEventListener(name, adapter);
     };
   }
-  own(resources: readonly OwnedResource[]) {
-    if (resources.length === 0) {
-      return;
-    }
-    if (this._disposed) {
-      disposeOwnedResources(resources);
-      return;
-    }
-    (this._owned ??= []).push(...resources);
-  }
-  dispose() {
-    if (this._disposed) {
-      return;
-    }
-    this._disposed = true;
-    const owned = this._owned;
-    this._owned = undefined;
-    if (!owned) {
-      return;
-    }
-    disposeOwnedResources(owned);
-  }
   [Symbol.dispose]() {
     this.dispose();
   }
@@ -430,27 +401,59 @@ function makeNonEnumerable(object: object, keys: string[]) {
 
 const lensKeys = new WeakMap<object, PropertyKey>();
 
+class AnyStateHandle<TState = any, TEvents extends EventTypes = any> {
+  constructor(
+    private readonly state: Signal<Immutable<TState>>,
+    /**
+     * Emit a custom event with zero or one argument.
+     */
+    readonly emit: [TEvents] extends [{}]
+      ? <TEvent extends string & keyof TEvents>(
+          name: TEvent,
+          ...args: TEvents[TEvent]
+        ) => void
+      : never,
+    /**
+     * Attach cleanup functions or disposables to the managed state instance.
+     */
+    readonly own: (resources: OwnedResources) => void,
+  ) {
+    // Hide non-inherited methods to allow spreading the handle into the public
+    // state object.
+    makeNonEnumerable(this, ["emit", "own"]);
+  }
+
+  /** Read the current immutable base state. This read is tracked. */
+  get(): Immutable<TState> {
+    return this.state.value;
+  }
+
+  /** Read the current immutable base state snapshot without tracking. */
+  peek(): Immutable<TState> {
+    return this.state.peek();
+  }
+
+  /** Replace the base state, or update it with an Immer producer. */
+  set(value: TState | Producer<TState>) {
+    this.state.value = isProducer(value)
+      ? produce(this.state.value, value)
+      : castImmutable(value);
+  }
+}
+
 function createStateHandle<TState, TEvents extends EventTypes>(
   state: Signal<Immutable<TState>>,
-  own: (resources: readonly OwnedResource[]) => void,
   emit: (name: string, detail?: any) => any,
+  own: (resources: OwnedResources) => void,
 ): StateHandle<TState, TEvents> {
-  const handle: AnyStateHandle<TState, TEvents> = {
-    get: () => state.value,
-    peek: () => state.peek(),
-    set: (update) => {
-      state.value = isProducer(update)
-        ? produce(state.value, update)
-        : castImmutable(update);
-    },
+  const handle = new AnyStateHandle<TState, TEvents>(
+    state,
+    emit as unknown as AnyStateHandle<TState, TEvents>["emit"],
     own,
-    emit: emit as any,
-  };
+  );
 
-  // Hide methods to allow spreading the handle into the public state object.
-  makeNonEnumerable(handle, Object.keys(handle));
+  let lenses: Map<PropertyKey, Lens> | undefined;
 
-  const lenses = new Map<PropertyKey, Lens>();
   const getLensDescriptor = (key: PropertyKey) => {
     const currentState = state.value;
     if (!isLensableState(currentState)) {
@@ -459,7 +462,7 @@ function createStateHandle<TState, TEvents extends EventTypes>(
     return Reflect.getOwnPropertyDescriptor(currentState, key);
   };
   const getLens = (key: PropertyKey) => {
-    let lens = lenses.get(key);
+    let lens = (lenses ||= new Map<PropertyKey, Lens>()).get(key);
     if (!lens) {
       lens = {
         get: () => (handle.get() as any)[key],
@@ -546,6 +549,10 @@ function getLensKey(value: unknown): PropertyKey | undefined {
   return lensKeys.get(value);
 }
 
+function toOwnedResources(resources: OwnedResources): readonly OwnedResource[] {
+  return Array.isArray(resources) ? resources : [resources as OwnedResource];
+}
+
 function disposeOwnedResources(resources: readonly OwnedResource[]) {
   let errors: unknown[] | undefined;
   for (let index = resources.length - 1; index >= 0; index -= 1) {
@@ -583,13 +590,15 @@ export function useManagedState<
   constructor: StateConstructor<TState, TEvents, [], TProps>,
   initialState: TInitialState | (() => TInitialState),
 ): ManagedState<InferState<TProps>, TEvents, InferPublicProps<TProps>> {
-  return useState(
+  const managedState = useState(
     () =>
       new (defineManagedState(
         constructor,
         isFunction(initialState) ? initialState() : initialState,
       ))(),
   )[0];
+  useEffect(() => () => managedState.dispose(), [managedState]);
+  return managedState;
 }
 
 function isFunction(value: unknown): value is (...args: any[]) => any {

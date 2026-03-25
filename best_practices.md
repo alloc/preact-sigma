@@ -99,6 +99,32 @@ const Search = defineManagedState(
 );
 ```
 
+## Own External Resources Explicitly
+
+When a managed state's lifecycle should control cleanup, register cleanup functions or disposables through `handle.own()` and release them with `.dispose()`.
+
+That keeps timers, subscriptions, and similar resources tied to the managed-state instance instead of leaking into ad hoc external bookkeeping.
+
+```ts
+type PollerState = {
+  ticks: number;
+};
+
+const Poller = defineManagedState(
+  (poller: StateHandle<PollerState>) => ({
+    ticks: poller.ticks,
+    start() {
+      const interval = window.setInterval(() => {
+        poller.ticks.set((ticks) => ticks + 1);
+      }, 1000);
+
+      poller.own([() => window.clearInterval(interval)]);
+    },
+  }),
+  { ticks: 0 },
+);
+```
+
 ## Use `query()` For Tracked Public Reads
 
 Returned methods are action-wrapped by default. When a public method is conceptually a read, tag it with `query()` so its body participates in signal tracking.
@@ -157,6 +183,8 @@ Prefer names like `save()`, `submit()`, `open()`, `close()`, or `rename()` over 
 Managed state constructors and public actions do not use a `this` context. They work through closure over the typed `StateHandle`.
 
 That usually means extra binding or wrapper callbacks are unnecessary when passing public actions around.
+
+Query functions also read from closed-over handles or signals and do not use `this`.
 
 ## Keep Events Domain-Specific
 

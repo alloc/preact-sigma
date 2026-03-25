@@ -4,16 +4,20 @@
 
 - `base state`: The private mutable state owned by one managed state definition. It may be any non-function value, including a primitive.
 - `public state`: The immutable data exposed on a managed state instance. It is derived from returned signals, returned top-level lenses, returned handles, and returned nested managed states.
-- `managed state`: An instance created by `defineManagedState()` or returned by `useManagedState()`. It exposes immutable public data, public methods, subscriptions, and custom events.
+- `managed state`: An instance created by `defineManagedState()` or returned by `useManagedState()`. It exposes immutable public data, public methods, subscriptions, events, and disposal.
 - `manager class`: The class returned by `defineManagedState()`. Best practice is to name it with a `Manager` suffix.
 - `constructor`: The function passed to `defineManagedState()` or `useManagedState()`. It receives a typed `StateHandle`.
-- `handle`: The first constructor parameter. Its type must be `StateHandle<...>`. It is the private control surface for reading, writing, deriving, and emitting.
+- `handle`: The first constructor parameter. Its type must be `StateHandle<...>`. It is the private control surface for reading, writing, owning resources, and emitting.
 - `lens`: A constructor-local object for one top-level property of an object-shaped base state. A lens has `get()` and `set()`.
 - `signal`: A `ReadonlySignal` from `@preact/signals`.
+- `signal-backed public property`: A public property backed by a returned signal, returned lens, or returned handle. Keyed `get`, `peek`, and `subscribe` target only these properties.
 - `derived value`: A value computed from state rather than stored directly.
 - `public action`: A returned method intended to change state. Returned methods are action-wrapped by default.
 - `query method`: A returned method wrapped with `query()`. Query methods are tracked reads and are not action-wrapped.
 - `event map`: A type mapping event names to zero-or-one-argument tuples, for example `{ saved: []; selected: [{ id: string }] }`.
+- `cleanup`: A function of type `() => void`.
+- `disposable`: An object with a `[Symbol.dispose]()` method.
+- `owned resource`: A cleanup function or disposable registered through `handle.own()`.
 - `object-shaped state`: A base state that is a plain object. It is not a function, array, `Map`, or `Set`.
 - `top-level property`: A direct property on an object-shaped base state, such as `query` in `{ query: string }`.
 - `composition`: Returning one managed state instance from another managed state constructor so the nested instance is exposed unchanged as a public property.
@@ -33,6 +37,7 @@ It is designed to:
 - support derived reactive values
 - support typed custom events
 - support composition of nested managed states
+- support instance-owned resource cleanup
 
 ## Runtime Exports
 
@@ -69,6 +74,7 @@ It is designed to:
 - Returned signals and returned top-level lenses become tracked getter properties on the public instance.
 - Returning the handle exposes the full base state as one reactive immutable public property.
 - Returning a managed state instance exposes that nested managed state unchanged.
+- Keyed `get`, `peek`, and `subscribe` apply only to signal-backed public properties, not to composed managed-state properties.
 
 ## `defineManagedState()`
 
@@ -80,6 +86,7 @@ Behavior:
 - constructor parameters after the handle become runtime constructor parameters for the class
 - internal state and event types are inferred from the typed `StateHandle` parameter
 - the resulting instance exposes immutable public data plus public methods
+- the resulting instance owns any resources registered through `handle.own()`
 
 ## `useManagedState()`
 
@@ -100,6 +107,7 @@ Methods:
 - `get()`: tracked read of the current immutable base state
 - `peek()`: untracked read of the current immutable base state
 - `set(next)`: replace the base state or update it with an Immer producer
+- `own(resources)`: attach cleanup functions or disposables to the managed state instance
 - `emit(name, arg?)`: emit a typed custom event with zero or one argument
 
 For object-shaped base state only:
@@ -130,18 +138,19 @@ A managed state instance exposes:
 - public methods returned by the constructor
 - subscription methods
 - event subscription methods
+- disposal methods
 
 Read APIs:
 
-- `get(key)`: return the underlying signal for one exposed property
+- `get(key)`: return the underlying signal for one exposed signal-backed public property
 - `get()`: return the underlying signal for the whole public state
-- `peek(key)`: untracked read of one exposed property
+- `peek(key)`: untracked read of one exposed signal-backed public property
 - `peek()`: untracked read of the whole public state
 
 Subscription APIs:
 
-- `subscribe(key, listener)`: subscribe to one exposed property
-- `subscribe(listener)`: subscribe to the whole public state
+- `subscribe(key, listener)`: subscribe to the current and future values of one exposed signal-backed public property
+- `subscribe(listener)`: subscribe to the current and future whole public state
 - both forms return an unsubscribe function
 
 Event API:
@@ -149,6 +158,11 @@ Event API:
 - `on(name, listener)`: subscribe to one custom event
 - listener receives the emitted argument directly, or no argument at all
 - returns an unsubscribe function
+
+Disposal API:
+
+- `dispose()`: dispose the managed state instance and its owned resources
+- `[Symbol.dispose]()` does the same thing as `dispose()`
 
 ## `query()`
 
@@ -158,6 +172,7 @@ Behavior:
 
 - wraps the method body in `computed()`
 - lets reads inside the method participate in Signals tracking after the method is exposed publicly
+- query functions read from closed-over handles or signals and do not use an instance receiver
 - skips the default `action()` wrapping step
 
 Use `query()` for public methods that conceptually answer a question.
@@ -190,6 +205,7 @@ Behavior:
 
 - accepts any subscribable target, including a managed state or a Preact signal
 - keeps the listener fresh automatically
+- calls the listener immediately with the current value, then with future updates
 - does not take a dependency array
 - accepts `null` to disable the subscription temporarily
 
@@ -214,6 +230,8 @@ Use `isManagedState(value)` to check whether a value is a managed-state instance
 - primitive base state
 - plain-object base state
 - Immer producer updates
+- lifecycle-owned cleanup via `handle.own()`
+- disposal via `dispose()` or `[Symbol.dispose]()`
 - reactive derived properties via returned signals
 - tracked read methods via `query()`
 - public exposure of one top-level property via a returned lens
@@ -252,6 +270,7 @@ Use `isManagedState(value)` to check whether a value is a managed-state instance
 - Return one top-level lens when one public field should stay reactive.
 - Spread an object-shaped handle when the public managed state should mirror the base state's top-level shape.
 - Return the full handle only when the whole base state should be one public property.
+- Use `handle.own()` when the managed-state instance should control external cleanup.
 
 ### Derivations
 
@@ -265,6 +284,7 @@ Use `isManagedState(value)` to check whether a value is a managed-state instance
 - Prefer verbs like `save`, `submit`, `open`, `close`, and `rename` over low-level mutation names.
 - Avoid unnecessary binding. Public methods work through closure over the typed handle, not through `this`.
 - Keep nested features as separate managed states when they already have a clean public API.
+- Prefer explicit disposal when a managed state owns external resources.
 
 ### Events
 
@@ -276,6 +296,7 @@ Use `isManagedState(value)` to check whether a value is a managed-state instance
 
 - If a snippet assigns `const stop = thing.on(...)`, `stop` is an unsubscribe function.
 - If a snippet assigns `const stop = thing.subscribe(...)`, `stop` is an unsubscribe function.
+- If a snippet calls `handle.own([...])`, those resources are released by `instance.dispose()` or `instance[Symbol.dispose]()`.
 - If a returned method is wrapped with `query()`, treat it as a tracked read, not a mutating action.
 - If a constructor returns `...handle`, treat each top-level object property as a public tracked property.
 - If a constructor returns `field: handle.someField`, treat `field` as a public tracked property whose value is the lens's current value, not as the lens object itself.
