@@ -26,7 +26,7 @@ type InferActions<TProps extends object> = {} & FilterProperties<
 
 type InferManagedStates<TProps extends object> = {} & FilterProperties<
   TProps,
-  AnyManagedState<any, any, any>
+  AnyManagedState
 >;
 
 type InferPublicProps<TProps extends object> = InferActions<TProps> &
@@ -45,6 +45,8 @@ type OnlyPlainObject<TState> = TState extends object
 type AnyStateHandle<TState = any, TEvents extends EventTypes = any> = {
   /** Read the current immutable base state. This read is tracked. */
   get: () => Immutable<TState>;
+  /** Read the current immutable base state snapshot without tracking. */
+  peek: () => Immutable<TState>;
   /** Replace the base state, or update it with an Immer producer. */
   set: (value: TState | Producer<TState>) => void;
   /**
@@ -74,17 +76,19 @@ type InferState<TProps extends object> = {} & {
     : never;
 };
 
-type AnyManagedState<
-  TState = any,
-  TEvents extends EventTypes = any,
-  TSnapshotProps extends object = {},
-> = {
+type AnyManagedState<TState = any, TEvents extends EventTypes = any> = {
   /** Get the underlying signal for an exposed signal or base-state property. */
   get<K extends keyof TState>(key: K): ReadonlySignal<Immutable<TState[K]>>;
+  get(): ReadonlySignal<Immutable<TState>>;
   /** Read the current immutable public state snapshot without tracking. */
-  peek(): Immutable<TState> & TSnapshotProps;
+  peek<K extends keyof TState>(key: K): Immutable<TState[K]>;
+  peek(): Immutable<TState>;
   /** Subscribe to future immutable state snapshots. Returns a function to unsubscribe. */
-  subscribe(listener: (value: Immutable<TState> & TSnapshotProps) => void): () => void;
+  subscribe<K extends keyof TState>(
+    key: K,
+    listener: (value: Immutable<TState[K]>) => void,
+  ): () => void;
+  subscribe(listener: (value: Immutable<TState>) => void): () => void;
   /**
    * Subscribe to a custom event emitted by this managed state.
    *
@@ -107,10 +111,7 @@ export type ManagedState<
   TState,
   TEvents extends EventTypes = EventTypes,
   TProps extends object = Record<string, unknown>,
-  TSnapshotProps extends object = InferManagedStates<TProps>,
-> = AnyManagedState<TState, TEvents, TSnapshotProps> &
-  Immutable<TState> &
-  TProps;
+> = AnyManagedState<TState, TEvents> & Immutable<TState> & TProps;
 
 /**
  * Constructor-local access to one top-level property of an object-shaped base
@@ -223,12 +224,7 @@ export function defineManagedState<
     }
   } as unknown as new (
     ...params: TParams
-  ) => ManagedState<
-    InferState<TProps>,
-    TEvents,
-    InferPublicProps<TProps>,
-    InferManagedStates<TProps>
-  >;
+  ) => ManagedState<InferState<TProps>, TEvents, InferPublicProps<TProps>>;
 }
 
 /** @internal */
@@ -278,7 +274,10 @@ class StateContainer extends EventTarget {
       }
     }
   }
-  get(key: string) {
+  get(key?: string) {
+    if (!key) {
+      return this._view;
+    }
     const prop = this._props[key];
     return prop instanceof Signal
       ? prop
@@ -286,11 +285,30 @@ class StateContainer extends EventTarget {
         ? this._state
         : undefined;
   }
-  peek() {
-    return this._view.peek();
+  peek(key?: string) {
+    if (!key) {
+      return this._view.peek();
+    }
+    const signal = this.get(key);
+    if (!signal) {
+      throw new Error(`Property ${key} is not a signal`);
+    }
+    return signal.peek();
   }
-  subscribe(listener: (value: any) => void) {
-    return this._view.subscribe(listener);
+  subscribe(
+    ...args:
+      | [listener: (value: any) => void]
+      | [key: string, listener: (value: any) => void]
+  ) {
+    if (args.length > 1) {
+      const [key, listener] = args as [string, (value: any) => void];
+      const signal = this.get(key);
+      if (!signal) {
+        throw new Error(`Property ${key} is not a signal`);
+      }
+      return signal.subscribe(listener);
+    }
+    return this._view.subscribe(args[0] as (value: any) => void);
   }
   on(name: string, listener: (...args: any[]) => void) {
     const adapter: EventListener = (event: Event) => {
@@ -318,6 +336,7 @@ function createStateHandle<TState, TEvents extends EventTypes>(
 ): StateHandle<TState, TEvents> {
   const handle: AnyStateHandle<TState, TEvents> = {
     get: () => state.value,
+    peek: () => state.peek(),
     set: (update) => {
       state.value = isProducer(update)
         ? produce(state.value, update)
@@ -381,12 +400,7 @@ export function useManagedState<
 >(
   constructor: StateConstructor<TState, TEvents, [], TProps>,
   initialState: TInitialState | (() => TInitialState),
-): ManagedState<
-  InferState<TProps>,
-  TEvents,
-  InferPublicProps<TProps>,
-  InferManagedStates<TProps>
-> {
+): ManagedState<InferState<TProps>, TEvents, InferPublicProps<TProps>> {
   return useState(
     () =>
       new (defineManagedState(
