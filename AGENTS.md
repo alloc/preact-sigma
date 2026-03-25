@@ -11,3 +11,4 @@
   - When the user corrects the agent on a general style or discipline preference, and the correction is not domain-specific or overly specific, add that guidance to `AGENTS.md` so it applies going forward.
   - Keep that `AGENTS.md` update in a separate commit from other work.
   - Add guidance under the category it actually belongs to. Keep categories broad and generally reusable rather than narrowly scoped.
+  - Do not add domain-specific terminology, conventions, or project-specific guidance to `AGENTS.md`. Keep it reusable across projects.

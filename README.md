@@ -15,8 +15,10 @@ type CounterEvents = {
   thresholdReached: [{ count: number }];
 };
 
-const CounterManager = defineManagedState(
-  (counter: StateHandle<number, CounterEvents>, step: number) => {
+type CounterState = number;
+
+const Counter = defineManagedState(
+  (counter: StateHandle<CounterState, CounterEvents>, step: number) => {
     const doubled = computed(() => counter.get() * 2);
 
     return {
@@ -37,7 +39,7 @@ const CounterManager = defineManagedState(
   0
 );
 
-const counter = new CounterManager(2);
+const counter = new Counter(2);
 
 counter.count;
 counter.doubled;
@@ -55,8 +57,10 @@ Use `defineManagedState()` when you want a reusable managed-state class.
 ```ts
 import { defineManagedState, type StateHandle } from "preact-sigma";
 
-const CounterManager = defineManagedState(
-  (counter: StateHandle<number>) => ({
+type CounterState = number;
+
+const Counter = defineManagedState(
+  (counter: StateHandle<CounterState>) => ({
     count: counter,
     increment() {
       counter.set((value) => value + 1);
@@ -73,14 +77,16 @@ Return the constructor handle when you want the base state to appear as a reacti
 ```ts
 import { defineManagedState, type StateHandle } from "preact-sigma";
 
-const CounterManager = defineManagedState(
-  (count: StateHandle<number>) => ({
+type CounterState = number;
+
+const Counter = defineManagedState(
+  (count: StateHandle<CounterState>) => ({
     count,
   }),
   0
 );
 
-new CounterManager().count;
+new Counter().count;
 ```
 
 ## Memoize A Reactive Derivation
@@ -90,14 +96,16 @@ Use `computed()` when you want a memoized reactive value on the public instance.
 ```ts
 import { computed, defineManagedState, type StateHandle } from "preact-sigma";
 
-const CounterManager = defineManagedState(
-  (counter: StateHandle<number>) => ({
+type CounterState = number;
+
+const Counter = defineManagedState(
+  (counter: StateHandle<CounterState>) => ({
     doubled: computed(() => counter.get() * 2),
   }),
   0
 );
 
-new CounterManager().doubled;
+new Counter().doubled;
 ```
 
 ## Read Base State Inside A Constructor
@@ -107,8 +115,10 @@ Use `handle.get()` when you want a tracked read of the current base state.
 ```ts
 import { defineManagedState, type StateHandle } from "preact-sigma";
 
-const CounterManager = defineManagedState(
-  (counter: StateHandle<number>) => ({
+type CounterState = number;
+
+const Counter = defineManagedState(
+  (counter: StateHandle<CounterState>) => ({
     isPositive() {
       return counter.get() > 0;
     },
@@ -124,8 +134,10 @@ Use `handle.peek()` when you need the current base-state snapshot without creati
 ```ts
 import { defineManagedState, type StateHandle } from "preact-sigma";
 
-const CounterManager = defineManagedState(
-  (counter: StateHandle<number>) => ({
+type CounterState = number;
+
+const Counter = defineManagedState(
+  (counter: StateHandle<CounterState>) => ({
     logNow() {
       console.log(counter.peek());
     },
@@ -145,7 +157,7 @@ type SearchState = {
   query: string;
 };
 
-const SearchManager = defineManagedState(
+const Search = defineManagedState(
   (search: StateHandle<SearchState>) => ({
     trimmedQuery: computed(() => search.query.get().trim()),
     setQuery(query: string) {
@@ -163,8 +175,10 @@ Return another managed-state instance when you want to expose it unchanged as a 
 ```ts
 import { defineManagedState, type StateHandle } from "preact-sigma";
 
-const CounterManager = defineManagedState(
-  (count: StateHandle<number>) => ({
+type CounterState = number;
+
+const Counter = defineManagedState(
+  (count: StateHandle<CounterState>) => ({
     count,
     increment() {
       count.set((value) => value + 1);
@@ -173,15 +187,19 @@ const CounterManager = defineManagedState(
   0
 );
 
-const DashboardManager = defineManagedState(
-  (dashboard: StateHandle<{ ready: boolean }>) => ({
+type DashboardState = {
+  ready: boolean;
+};
+
+const Dashboard = defineManagedState(
+  (dashboard: StateHandle<DashboardState>) => ({
     dashboard,
-    counter: new CounterManager(),
+    counter: new Counter(),
   }),
   { ready: false }
 );
 
-new DashboardManager().counter.increment();
+new Dashboard().counter.increment();
 ```
 
 ## Update State
@@ -191,8 +209,12 @@ Pass an Immer producer to `.set()` when your base state is object-shaped.
 ```ts
 import { defineManagedState, type StateHandle } from "preact-sigma";
 
-const SearchManager = defineManagedState(
-  (search: StateHandle<{ query: string }>) => ({
+type SearchState = {
+  query: string;
+};
+
+const Search = defineManagedState(
+  (search: StateHandle<SearchState>) => ({
     setQuery(query: string) {
       search.set((draft) => {
         draft.query = query;
@@ -215,8 +237,10 @@ type TodoEvents = {
   selected: [{ id: string }];
 };
 
-const TodoManager = defineManagedState(
-  (todo: StateHandle<{}, TodoEvents>) => ({
+type TodoState = {};
+
+const Todo = defineManagedState(
+  (todo: StateHandle<TodoState, TodoEvents>) => ({
     save() {
       todo.emit("saved");
     },
@@ -233,7 +257,7 @@ const TodoManager = defineManagedState(
 Use `.on()` to subscribe to custom events from a managed state instance.
 
 ```ts
-const todo = new TodoManager();
+const todo = new Todo();
 
 todo.on("saved", () => {
   console.log("saved");
@@ -249,7 +273,7 @@ todo.on("selected", (event) => {
 Use `.get(key)` for one exposed property or `.get()` for the whole public state signal.
 
 ```ts
-const counter = new CounterManager();
+const counter = new Counter();
 
 const countSignal = counter.get("count");
 const counterSignal = counter.get();
@@ -263,7 +287,7 @@ counterSignal.value.count;
 Use `.peek(key)` for one exposed property or `.peek()` for the whole public snapshot.
 
 ```ts
-const counter = new CounterManager();
+const counter = new Counter();
 
 counter.peek("count");
 counter.peek();
@@ -274,7 +298,7 @@ counter.peek();
 Use `.subscribe(key, listener)` for one exposed property or `.subscribe(listener)` for the whole public state.
 
 ```ts
-const counter = new CounterManager();
+const counter = new Counter();
 
 const stopCount = counter.subscribe("count", (count) => {
   console.log(count);
@@ -292,9 +316,13 @@ Use `useManagedState()` when you want the same pattern directly inside a compone
 ```tsx
 import { computed, useManagedState, type StateHandle } from "preact-sigma";
 
+type SearchState = {
+  query: string;
+};
+
 function SearchBox() {
   const search = useManagedState(
-    (search: StateHandle<{ query: string }>) => ({
+    (search: StateHandle<SearchState>) => ({
       query: computed(() => search.query.get()),
       setQuery(query: string) {
         search.query.set(query);
@@ -366,8 +394,10 @@ This pattern works well when a component or UI feature needs a small state model
 ```ts
 import { defineManagedState, type StateHandle } from "preact-sigma";
 
-const DialogManager = defineManagedState(
-  (dialog: StateHandle<boolean>) => ({
+type DialogState = boolean;
+
+const Dialog = defineManagedState(
+  (dialog: StateHandle<DialogState>) => ({
     open: dialog,
     show() {
       dialog.set(true);

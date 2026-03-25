@@ -6,16 +6,16 @@ Always explicitly type the first parameter of a `defineManagedState()` or `useMa
 
 When the managed state emits events, prefer declaring a separate event type alias named `${ModelName}Events` instead of writing the event map inline inside the `StateHandle` type argument.
 
-When AI agents are generating code, also prefer declaring a `${ModelName}State` type alias before the event type alias, even if the state type is simple.
+Declare the `${ModelName}State` type alias immediately before the `defineManagedState()` call, even if the state type is simple.
 
 ```ts
-type CounterState = number;
-
 type CounterEvents = {
   thresholdReached: [{ count: number }];
 };
 
-const CounterManager = defineManagedState(
+type CounterState = number;
+
+const Counter = defineManagedState(
   (count: StateHandle<CounterState, CounterEvents>) => ({
     count,
   }),
@@ -25,32 +25,7 @@ const CounterManager = defineManagedState(
 
 This is how the library infers the internal state and event types. Avoid specifying explicit type parameters on `defineManagedState()` or `useManagedState()` when the constructor parameter can express the same information more locally and clearly.
 
-The extra `${ModelName}State` alias is mainly an AI-facing convention. It gives code generators the state name before they choose the handle identifier, which makes it easier for them to follow the handle naming guideline consistently.
-
-## Name The Manager Class Clearly
-
-Assign the value returned by `defineManagedState()` to a variable whose name ends with `Manager`, such as `TodoListManager` or `DialogManager`.
-
-That keeps the reusable managed-state class visually distinct from the underlying state shape and from constructor-local handle names like `todoList` or `dialog`.
-
-When you use supporting aliases, keep the unsuffixed model name for the underlying state and events.
-
-```ts
-type TodoListState = {
-  filter: "all" | "active" | "done";
-};
-
-type TodoListEvents = {
-  saved: [];
-};
-
-const TodoListManager = defineManagedState(
-  (todoList: StateHandle<TodoListState, TodoListEvents>) => ({
-    todoList,
-  }),
-  { filter: "all" },
-);
-```
+That keeps the state type easy to reference from the constructor's `StateHandle` and makes the nearby type information easier to scan.
 
 ## Name The Handle Precisely
 
@@ -89,7 +64,7 @@ type SearchState = {
   query: string;
 };
 
-const SearchManager = defineManagedState(
+const Search = defineManagedState(
   (search: StateHandle<SearchState>) => ({
     setQuery(query: string) {
       search.query.set(query);
@@ -102,15 +77,17 @@ const SearchManager = defineManagedState(
 );
 ```
 
-## Compose Managers At Feature Boundaries
+## Compose Managed States At Feature Boundaries
 
 When a nested feature already has a clean public API, prefer returning that managed state instance instead of flattening both concerns into one larger model.
 
 That keeps each managed state focused and lets callers work with the nested feature through its own methods and reactive properties.
 
 ```ts
-const CounterManager = defineManagedState(
-  (count: StateHandle<number>) => ({
+type CounterState = number;
+
+const Counter = defineManagedState(
+  (count: StateHandle<CounterState>) => ({
     count,
     increment() {
       count.set((value) => value + 1);
@@ -119,10 +96,14 @@ const CounterManager = defineManagedState(
   0,
 );
 
-const DashboardManager = defineManagedState(
-  (dashboard: StateHandle<{ ready: boolean }>) => ({
+type DashboardState = {
+  ready: boolean;
+};
+
+const Dashboard = defineManagedState(
+  (dashboard: StateHandle<DashboardState>) => ({
     dashboard,
-    counter: new CounterManager(),
+    counter: new Counter(),
   }),
   { ready: false },
 );
