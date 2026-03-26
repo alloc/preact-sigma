@@ -9,7 +9,8 @@
     "url": "https://github.com/alloc/preact-sigma.git"
   },
   "files": [
-    "dist"
+    "dist",
+    "llms.txt"
   ],
   "type": "module",
   "exports": {
