@@ -21,6 +21,7 @@
   "scripts": {
     "build": "tsdown",
     "test": "vitest run",
+    "typecheck": "tsc --noEmit --allowImportingTsExtensions",
     "fmt": "oxfmt",
     "lint": "oxlint"
   },
