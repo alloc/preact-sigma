@@ -41,15 +41,21 @@ It is designed to:
 
 ## Runtime Exports
 
-- `defineManagedState`
-- `useManagedState`
-- `useSubscribe`
-- `useEventTarget`
-- `isManagedState`
-- `query`
-- `computed`
-- `batch`
-- `untracked`
+All runtime functions must be imported directly from `preact-sigma`.
+
+```typescript
+import {
+  defineManagedState,
+  useManagedState,
+  useSubscribe,
+  useEventTarget,
+  isManagedState,
+  query,
+  computed,
+  batch,
+  untracked
+} from 'preact-sigma';
+```
 
 ## Public Type Exports
 
@@ -75,6 +81,62 @@ It is designed to:
 - Returning the handle exposes the full base state as one reactive immutable public property.
 - Returning a managed state instance exposes that nested managed state unchanged.
 - Keyed `get`, `peek`, and `subscribe` apply only to signal-backed public properties, not to composed managed-state properties.
+
+## Core Examples
+
+### Defining a Manager Class
+```typescript
+import { defineManagedState, query, type StateHandle } from 'preact-sigma';
+
+type CounterState = { count: number; name: string };
+type CounterEvents = { maxReached: [] };
+
+export const useCounterManager = defineManagedState(
+  (handle: StateHandle<CounterState, CounterEvents>, initialName: string) => {
+    // Top-level lenses
+    const { count, name } = handle;
+
+    return {
+      // Expose lenses as tracked getter properties
+      count,
+      name,
+
+      // Mutating Action (uses Immer producer under the hood)
+      increment() {
+        handle.set(draft => {
+          draft.count += 1;
+        });
+
+        if (handle.peek().count >= 10) {
+          handle.emit('maxReached');
+        }
+      },
+
+      // Tracked read using query()
+      isEven: query(() => count.get() % 2 === 0),
+    };
+  },
+  { count: 0, name: 'Default' } // Initial State
+);
+```
+
+### Using in a Component
+```tsx
+import { useCounterManager } from './counter-manager';
+
+export function Counter() {
+  const manager = useCounterManager("My Counter");
+
+  // Tracked reads in JSX (no .value needed!)
+  return (
+    <div>
+      <p>{manager.name}: {manager.count}</p>
+      <p>Is Even: {manager.isEven() ? 'Yes' : 'No'}</p>
+      <button onClick={() => manager.increment()}>+1</button>
+    </div>
+  );
+}
+```
 
 ## `defineManagedState()`
 
@@ -245,6 +307,7 @@ Use `isManagedState(value)` to check whether a value is a managed-state instance
 - component-local managed state via `useManagedState`
 - hook-based subscriptions via `useSubscribe`
 - hook-based event subscriptions via `useEventTarget`
+- async actions (await promises inside returned methods, then call `handle.set()` or `lens.set()`)
 
 ## Unsupported Or Disallowed Patterns
 
@@ -300,3 +363,5 @@ Use `isManagedState(value)` to check whether a value is a managed-state instance
 - If a returned method is wrapped with `query()`, treat it as a tracked read, not a mutating action.
 - If a constructor returns `...handle`, treat each top-level object property as a public tracked property.
 - If a constructor returns `field: handle.someField`, treat `field` as a public tracked property whose value is the lens's current value, not as the lens object itself.
+- NEVER append `.value` when reading exposed signal-backed public properties on a manager instance (e.g., use `manager.count`, NOT `manager.count.value`). They are exposed as native getters.
+- When calling `handle.set(draft => ...)` or `lens.set(draft => ...)`, treat it exactly like an Immer producer. Mutate the `draft` directly. Do not return a completely new object from the callback unless you intend to entirely overwrite that state.
