@@ -20,9 +20,7 @@
   },
   "scripts": {
     "build": "tsdown",
-    "test": "pnpm run test:runtime && pnpm run test:types",
-    "test:runtime": "tsx --test tests/*.runtime.test.ts",
-    "test:types": "tsc -p tsconfig.framework-tests.json --noEmit",
+    "test": "vitest run",
     "fmt": "oxfmt",
     "lint": "oxlint"
   },
@@ -38,9 +36,10 @@
     "lucide-react": "^1.6.0",
     "oxfmt": "^0.42.0",
     "oxlint": "^1.57.0",
+    "preact-sigma": "link:",
     "tsdown": "^0.21.4",
-    "tsx": "^4.21.0",
     "typescript": "^6.0.2",
-    "vite": "^8.0.2"
+    "vite": "^8.0.2",
+    "vitest": "^4.1.1"
   }
 }

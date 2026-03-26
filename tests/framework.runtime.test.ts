@@ -1,5 +1,4 @@
-import assert from "node:assert/strict";
-import test from "node:test";
+import { assert, test } from "vitest";
 
 import {
   computed,
@@ -7,7 +6,7 @@ import {
   isManagedState,
   query,
   type StateHandle,
-} from "../src/index.js";
+} from "preact-sigma";
 
 test("top-level lenses read tracked values and update shallow properties", () => {
   let searchHandle!: StateHandle<{
@@ -447,15 +446,16 @@ test("owned resources are disposed in reverse order and aggregate errors", () =>
   }, {});
 
   const parent = new ParentManager();
+  let error: unknown;
 
-  assert.throws(
-    () => parent.dispose(),
-    (error: unknown) => {
-      assert.equal(error instanceof AggregateError, true);
-      assert.deepEqual((error as AggregateError).errors, [lastError, firstError]);
-      return true;
-    },
-  );
+  try {
+    parent.dispose();
+  } catch (thrownError) {
+    error = thrownError;
+  }
+
+  assert.equal(error instanceof AggregateError, true);
+  assert.deepEqual((error as AggregateError).errors, [lastError, firstError]);
 
   assert.deepEqual(steps, ["last cleanup", "child cleanup", "first cleanup"]);
 

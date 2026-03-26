@@ -8,7 +8,8 @@
     "module": "esnext",
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
-    "emitDeclarationOnly": true
+    "emitDeclarationOnly": true,
+    "rootDir": "."
   },
-  "include": ["src/**/*.ts", "tests/framework.types.test.ts"]
+  "include": ["tests"]
 }

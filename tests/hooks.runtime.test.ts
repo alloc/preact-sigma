@@ -1,9 +1,8 @@
-import assert from "node:assert/strict";
-import test from "node:test";
+// @vitest-environment jsdom
 
-import { render, type ComponentChildren, type FunctionComponent, h } from "preact";
+import { render, type FunctionComponent, h } from "preact";
 import { act } from "preact/test-utils";
-import { JSDOM } from "jsdom";
+import { afterEach, assert, test } from "vitest";
 
 import {
   defineManagedState,
@@ -11,49 +10,17 @@ import {
   useEventTarget,
   useManagedState,
   useSubscribe,
-} from "../src/index.js";
+} from "preact-sigma";
 
-type RestorableGlobal = keyof typeof globalThis;
-
-function setGlobal(name: RestorableGlobal, value: unknown) {
-  const previous = Object.getOwnPropertyDescriptor(globalThis, name);
-  Object.defineProperty(globalThis, name, {
-    configurable: true,
-    writable: true,
-    value,
-  });
-  return () => {
-    if (previous) {
-      Object.defineProperty(globalThis, name, previous);
-    } else {
-      delete (globalThis as Record<PropertyKey, unknown>)[name];
-    }
-  };
+function createContainer() {
+  const container = document.createElement("div");
+  document.body.append(container);
+  return container;
 }
 
-async function withDom(run: (container: Element, window: Window) => Promise<void> | void) {
-  const dom = new JSDOM("<!doctype html><html><body></body></html>");
-  const restore = [
-    setGlobal("window", dom.window),
-    setGlobal("document", dom.window.document),
-    setGlobal("navigator", dom.window.navigator),
-    setGlobal("Node", dom.window.Node),
-    setGlobal("Element", dom.window.Element),
-    setGlobal("HTMLElement", dom.window.HTMLElement),
-  ];
-  const container = dom.window.document.createElement("div");
-  dom.window.document.body.append(container);
-
-  try {
-    await run(container, dom.window);
-    await act(() => render(null, container));
-  } finally {
-    dom.window.close();
-    for (const restoreGlobal of restore.reverse()) {
-      restoreGlobal();
-    }
-  }
-}
+afterEach(() => {
+  document.body.innerHTML = "";
+});
 
 type Subscribable<T> = {
   current: T;
@@ -89,155 +56,151 @@ function createSubscribable<T>(initialValue: T): Subscribable<T> {
 }
 
 test("useManagedState initializes once and disposes on unmount", async () => {
-  await withDom(async (container) => {
-    let initializations = 0;
-    let disposals = 0;
-    let manager!: {
-      count: number;
-      increment(): void;
-    };
+  const container = createContainer();
+  let initializations = 0;
+  let disposals = 0;
+  let manager!: {
+    count: number;
+    increment(): void;
+  };
 
-    const Probe: FunctionComponent = () => {
-      manager = useManagedState(
-        (count: StateHandle<number>) => {
-          count.own(() => {
-            disposals += 1;
-          });
+  const Probe: FunctionComponent = () => {
+    manager = useManagedState(
+      (count: StateHandle<number>) => {
+        count.own(() => {
+          disposals += 1;
+        });
 
-          return {
-            count,
-            increment() {
-              count.set((value) => value + 1);
-            },
-          };
-        },
-        () => {
-          initializations += 1;
-          return 0;
-        },
-      );
+        return {
+          count,
+          increment() {
+            count.set((value) => value + 1);
+          },
+        };
+      },
+      () => {
+        initializations += 1;
+        return 0;
+      },
+    );
 
-      return null;
-    };
+    return null;
+  };
 
-    await act(() => render(h(Probe, {}), container));
-    const firstInstance = manager;
+  await act(() => render(h(Probe, {}), container));
+  const firstInstance = manager;
 
-    assert.equal(initializations, 1);
-    assert.equal(manager.count, 0);
+  assert.equal(initializations, 1);
+  assert.equal(manager.count, 0);
 
-    manager.increment();
-    assert.equal(manager.count, 1);
+  manager.increment();
+  assert.equal(manager.count, 1);
 
-    await act(() => render(h(Probe, {}), container));
+  await act(() => render(h(Probe, {}), container));
 
-    assert.equal(initializations, 1);
-    assert.equal(manager, firstInstance);
+  assert.equal(initializations, 1);
+  assert.equal(manager, firstInstance);
 
-    await act(() => render(null, container));
+  await act(() => render(null, container));
 
-    assert.equal(disposals, 1);
-  });
+  assert.equal(disposals, 1);
 });
 
 test("useSubscribe keeps listeners fresh and unsubscribes when disabled", async () => {
-  await withDom(async (container) => {
-    const observedValues: string[] = [];
-    const target = createSubscribable(0);
+  const container = createContainer();
+  const observedValues: string[] = [];
+  const target = createSubscribable(0);
 
-    const Probe: FunctionComponent<{
-      label: string;
-      target: Subscribable<number> | null;
-    }> = ({ label, target }) => {
-      useSubscribe(target, (value) => {
-        observedValues.push(`${label}:${value}`);
-      });
+  const Probe: FunctionComponent<{
+    label: string;
+    target: Subscribable<number> | null;
+  }> = ({ label, target }) => {
+    useSubscribe(target, (value) => {
+      observedValues.push(`${label}:${value}`);
+    });
 
-      return null;
-    };
+    return null;
+  };
 
-    await act(() => render(h(Probe, { label: "a", target }), container));
-    await act(() => render(h(Probe, { label: "b", target }), container));
+  await act(() => render(h(Probe, { label: "a", target }), container));
+  await act(() => render(h(Probe, { label: "b", target }), container));
 
-    target.emit(1);
+  target.emit(1);
 
-    await act(() => render(h(Probe, { label: "c", target: null }), container));
+  await act(() => render(h(Probe, { label: "c", target: null }), container));
 
-    target.emit(2);
+  target.emit(2);
 
-    assert.deepEqual(observedValues, ["a:0", "b:1"]);
-    assert.equal(target.subscribeCount, 1);
-    assert.equal(target.unsubscribeCount, 1);
-  });
+  assert.deepEqual(observedValues, ["a:0", "b:1"]);
+  assert.equal(target.subscribeCount, 1);
+  assert.equal(target.unsubscribeCount, 1);
 });
 
 test("useEventTarget supports DOM event targets", async () => {
-  await withDom(async (container, window) => {
-    const observedValues: string[] = [];
+  const container = createContainer();
+  const observedValues: string[] = [];
 
-    const Probe: FunctionComponent<{
-      label: string;
-      target: EventTarget | null;
-    }> = ({ label, target }) => {
-      useEventTarget(target, "ping", (event: Event) => {
-        observedValues.push(`${label}:${(event as CustomEvent<number>).detail}`);
-      });
+  const Probe: FunctionComponent<{
+    label: string;
+    target: EventTarget | null;
+  }> = ({ label, target }) => {
+    useEventTarget(target, "ping", (event: Event) => {
+      observedValues.push(`${label}:${(event as CustomEvent<number>).detail}`);
+    });
 
-      return null;
-    };
+    return null;
+  };
 
-    await act(() => render(h(Probe, { label: "a", target: window }), container));
-    window.dispatchEvent(new window.CustomEvent("ping", { detail: 1 }));
+  await act(() => render(h(Probe, { label: "a", target: window }), container));
+  window.dispatchEvent(new CustomEvent("ping", { detail: 1 }));
 
-    await act(() => render(h(Probe, { label: "b", target: window }), container));
-    window.dispatchEvent(new window.CustomEvent("ping", { detail: 2 }));
+  await act(() => render(h(Probe, { label: "b", target: window }), container));
+  window.dispatchEvent(new CustomEvent("ping", { detail: 2 }));
 
-    await act(() => render(h(Probe, { label: "c", target: null }), container));
-    window.dispatchEvent(new window.CustomEvent("ping", { detail: 3 }));
+  await act(() => render(h(Probe, { label: "c", target: null }), container));
+  window.dispatchEvent(new CustomEvent("ping", { detail: 3 }));
 
-    assert.deepEqual(observedValues, ["a:1", "b:2"]);
-  });
+  assert.deepEqual(observedValues, ["a:1", "b:2"]);
 });
 
 test("useEventTarget supports managed-state events", async () => {
-  await withDom(async (container) => {
-    type CounterEvents = {
-      thresholdReached: [{ count: number }];
-    };
+  const container = createContainer();
+  type CounterEvents = {
+    thresholdReached: [{ count: number }];
+  };
 
-    const CounterManager = defineManagedState(
-      (count: StateHandle<number, CounterEvents>) => ({
-        increment() {
-          count.set((value) => value + 1);
-          count.emit("thresholdReached", { count: count.get() });
-        },
-      }),
-      0,
-    );
+  const CounterManager = defineManagedState(
+    (count: StateHandle<number, CounterEvents>) => ({
+      increment() {
+        count.set((value) => value + 1);
+        count.emit("thresholdReached", { count: count.get() });
+      },
+    }),
+    0,
+  );
 
-    const counter = new CounterManager();
-    const observedCounts: string[] = [];
+  const counter = new CounterManager();
+  const observedCounts: string[] = [];
 
-    const Probe: FunctionComponent<{
-      label: string;
-      target: InstanceType<typeof CounterManager> | null;
-    }> = ({ label, target }) => {
-      useEventTarget(target, "thresholdReached", (event) => {
-        observedCounts.push(`${label}:${event.count}`);
-      });
+  const Probe: FunctionComponent<{
+    label: string;
+    target: InstanceType<typeof CounterManager> | null;
+  }> = ({ label, target }) => {
+    useEventTarget(target, "thresholdReached", (event) => {
+      observedCounts.push(`${label}:${event.count}`);
+    });
 
-      return null;
-    };
+    return null;
+  };
 
-    await act(() => render(h(Probe, { label: "a", target: counter }), container));
-    counter.increment();
+  await act(() => render(h(Probe, { label: "a", target: counter }), container));
+  counter.increment();
 
-    await act(() => render(h(Probe, { label: "b", target: counter }), container));
-    counter.increment();
+  await act(() => render(h(Probe, { label: "b", target: counter }), container));
+  counter.increment();
 
-    await act(() => render(h(Probe, { label: "c", target: null }), container));
-    counter.increment();
+  await act(() => render(h(Probe, { label: "c", target: null }), container));
+  counter.increment();
 
-    assert.deepEqual(observedCounts, ["a:1", "b:2"]);
-  });
+  assert.deepEqual(observedCounts, ["a:1", "b:2"]);
 });
