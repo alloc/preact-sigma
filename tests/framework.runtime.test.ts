@@ -82,6 +82,73 @@ test("returned top-level lenses become reactive public properties", () => {
   stop();
 });
 
+test("returned state handles become reactive public properties", () => {
+  const CounterManager = defineManagedState(
+    (count: StateHandle<number>) => ({
+      count,
+      increment() {
+        count.set((value) => value + 1);
+      },
+    }),
+    0,
+  );
+
+  const counter = new CounterManager();
+  const doubledCount = computed(() => counter.count * 2);
+  const observedCounts: number[] = [];
+  const stop = counter.subscribe("count", (count) => {
+    observedCounts.push(count);
+  });
+
+  assert.equal(counter.count, 0);
+  assert.equal(counter.peek("count"), 0);
+  assert.equal(counter.get("count")?.value, 0);
+  assert.equal(doubledCount.value, 0);
+
+  counter.increment();
+
+  assert.equal(counter.count, 1);
+  assert.equal(counter.peek("count"), 1);
+  assert.equal(counter.get("count")?.value, 1);
+  assert.equal(doubledCount.value, 2);
+  assert.deepEqual(observedCounts, [0, 1]);
+
+  stop();
+});
+
+test("returned computed signals become reactive public properties", () => {
+  const CounterManager = defineManagedState(
+    (count: StateHandle<number>) => ({
+      doubled: computed(() => count.get() * 2),
+      increment() {
+        count.set((value) => value + 1);
+      },
+    }),
+    0,
+  );
+
+  const counter = new CounterManager();
+  const observedValues: number[] = [];
+  const stop = counter.subscribe("doubled", (value) => {
+    observedValues.push(value);
+  });
+
+  assert.equal(counter.doubled, 0);
+  assert.equal(counter.peek("doubled"), 0);
+  assert.equal(counter.get("doubled")?.value, 0);
+  assert.equal(counter.get().value.doubled, 0);
+
+  counter.increment();
+
+  assert.equal(counter.doubled, 2);
+  assert.equal(counter.peek("doubled"), 2);
+  assert.equal(counter.get("doubled")?.value, 2);
+  assert.equal(counter.get().value.doubled, 2);
+  assert.deepEqual(observedValues, [0, 2]);
+
+  stop();
+});
+
 test("subscriptions emit the current value immediately", () => {
   const CounterManager = defineManagedState(
     (counter: StateHandle<{ count: number }>) => ({
@@ -116,6 +183,81 @@ test("subscriptions emit the current value immediately", () => {
   stopState();
 });
 
+test("events deliver payloads and unsubscribe cleanly", () => {
+  type TodoEvents = {
+    saved: [];
+    selected: [{ id: string }];
+  };
+
+  const TodoManager = defineManagedState(
+    (todo: StateHandle<{}, TodoEvents>) => ({
+      save() {
+        todo.emit("saved");
+      },
+      select(id: string) {
+        todo.emit("selected", { id });
+      },
+    }),
+    {},
+  );
+
+  const todo = new TodoManager();
+  let savedCount = 0;
+  const selectedIds: string[] = [];
+  const stopSaved = todo.on("saved", () => {
+    savedCount += 1;
+  });
+  const stopSelected = todo.on("selected", (event) => {
+    selectedIds.push(event.id);
+  });
+
+  todo.save();
+  todo.select("a");
+
+  stopSaved();
+  stopSelected();
+
+  todo.save();
+  todo.select("b");
+
+  assert.equal(savedCount, 1);
+  assert.deepEqual(selectedIds, ["a"]);
+});
+
+test("state handles update object state with Immer producers", () => {
+  let searchHandle!: StateHandle<{
+    page: number;
+    query: string;
+  }>;
+
+  const SearchManager = defineManagedState(
+    (search: typeof searchHandle) => {
+      searchHandle = search;
+
+      return {
+        query: search.query,
+        setQuery(query: string) {
+          search.set((draft) => {
+            draft.page += 1;
+            draft.query = query;
+          });
+        },
+      };
+    },
+    { page: 1, query: "" },
+  );
+
+  const search = new SearchManager();
+
+  search.setQuery("hello");
+
+  assert.equal(search.query, "hello");
+  assert.deepEqual(searchHandle.get(), { page: 2, query: "hello" });
+  assert.equal(search.peek().query, "hello");
+  assert.equal(search.get().value.query, "hello");
+  assert.deepEqual(searchHandle.peek(), { page: 2, query: "hello" });
+});
+
 test("spreading a state handle exposes top-level lenses without handle methods", () => {
   let searchHandle!: StateHandle<{
     options: { exact: boolean };
@@ -146,6 +288,30 @@ test("spreading a state handle exposes top-level lenses without handle methods",
 
   assert.equal(search.query, "hello");
   assert.equal(search.options.exact, true);
+});
+
+test("keyed subscriptions reject non-signal public properties", () => {
+  const CounterManager = defineManagedState(
+    (count: StateHandle<number>) => ({
+      count,
+    }),
+    0,
+  );
+
+  const DashboardManager = defineManagedState(
+    (dashboard: StateHandle<{ ready: boolean }>) => ({
+      ready: dashboard.ready,
+      child: new CounterManager(),
+    }),
+    { ready: false },
+  );
+
+  const dashboard = new DashboardManager();
+
+  assert.throws(
+    () => dashboard.subscribe("child" as never, () => {}),
+    /Property child is not a signal/,
+  );
 });
 
 test("composed managed states pass through unchanged", () => {
@@ -223,6 +389,26 @@ test("query methods keep signal tracking when they read state", () => {
   assert.equal(untrackedCount.value, 0);
 });
 
+test("state handle peek reads without tracking", () => {
+  const CounterManager = defineManagedState(
+    (count: StateHandle<number>) => ({
+      readCount: query(() => count.peek()),
+      increment() {
+        count.set((value) => value + 1);
+      },
+    }),
+    0,
+  );
+
+  const counter = new CounterManager();
+  const untrackedCount = computed(() => counter.readCount());
+
+  assert.equal(untrackedCount.value, 0);
+
+  counter.increment();
+
+  assert.equal(untrackedCount.value, 0);
+});
 test("owned resources are disposed in reverse order and aggregate errors", () => {
   const steps: string[] = [];
   const firstError = new Error("first");
@@ -327,18 +513,4 @@ test("owned resources can be added after disposal and dispose immediately", () =
     "late array cleanup",
     "late cleanup",
   ]);
-});
-
-test("managed state instances do not expose own", () => {
-  const Manager = defineManagedState(
-    (handle: StateHandle<{ ready: boolean }>) => ({
-      ready: handle.ready,
-    }),
-    { ready: false },
-  );
-
-  const manager = new Manager();
-
-  assert.equal("own" in manager, false);
-  assert.equal((manager as { own?: unknown }).own, undefined);
 });

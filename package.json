@@ -21,7 +21,7 @@
   "scripts": {
     "build": "tsdown",
     "test": "pnpm run test:runtime && pnpm run test:types",
-    "test:runtime": "tsx --test tests/framework.runtime.test.ts",
+    "test:runtime": "tsx --test tests/*.runtime.test.ts",
     "test:types": "tsc -p tsconfig.framework-tests.json --noEmit",
     "fmt": "oxfmt",
     "lint": "oxlint"
@@ -34,6 +34,7 @@
   "devDependencies": {
     "@preact/preset-vite": "^2.10.5",
     "@types/node": "^25.5.0",
+    "jsdom": "^29.0.1",
     "lucide-react": "^1.6.0",
     "oxfmt": "^0.42.0",
     "oxlint": "^1.57.0",
