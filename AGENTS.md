@@ -12,6 +12,7 @@
   - Use type tests for behavior that is enforced by the type system in supported usage.
   - Do not define runtime behavior with tests when reaching that behavior requires bypassing or silencing the type system, unless behavior under that bypass is itself part of the supported contract.
   - Do not lock tests to implementation details or optimizations unless those details are explicitly part of the public contract.
+  - Do not add tests just to cover re-exports or passthrough exports.
 - Agent maintenance
   - When the user corrects the agent on a general style or discipline preference, and the correction is not domain-specific or overly specific, add that guidance to `AGENTS.md` so it applies going forward.
   - Keep that `AGENTS.md` update in a separate commit from other work.
