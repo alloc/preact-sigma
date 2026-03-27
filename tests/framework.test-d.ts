@@ -1,3 +1,4 @@
+import type { Patch } from "immer";
 import { assertType, expectTypeOf, test } from "vitest";
 
 import { action, query, ref, SigmaType, type SigmaState } from "preact-sigma";
@@ -58,11 +59,20 @@ test("sigma infers public state from the two-step declaration", () => {
       todos: [],
     })
     .computed(todoListComputeds)
+    .queries(todoListQueries)
+    .observe(function (change) {
+      assertType<string>(this.draft);
+      assertType<number>(this.completedCount);
+      assertType<boolean>(this.canAdd());
+      assertType<string>(change.previousState.draft);
+      assertType<readonly Todo[]>(change.state.todos);
+      // @ts-expect-error patches are only available when requested
+      void change.patches;
+    })
     .setup(function (prefix: string) {
       void prefix;
       return [];
     })
-    .queries(todoListQueries)
     .actions(todoListActions);
 
   const todoList = new TodoList();
@@ -136,6 +146,19 @@ test("sigma infers public state from the two-step declaration", () => {
     .setup(function () {
       return () => {};
     });
+
+  new SigmaType<{ count: number }>()
+    .defaultState({
+      count: 0,
+    })
+    .observe(
+      function (change) {
+        assertType<number>(this.count);
+        assertType<readonly Patch[]>(change.patches);
+        assertType<readonly Patch[]>(change.inversePatches);
+      },
+      { patches: true },
+    );
 });
 
 test("inline builder methods infer this for state reads", () => {

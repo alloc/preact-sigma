@@ -48,6 +48,8 @@ import {
 - `InferEventType`
 - `InferSetupArgs`
 - `InferListener`
+- `SigmaObserveChange`
+- `SigmaObserveOptions`
 - `SigmaRef`
 - `SigmaState`
 
@@ -113,6 +115,7 @@ const todoList = new TodoList();
 - `defaultState` comes from `.defaultState(...)`, where each property may be either a value or a zero-argument initializer that returns the value.
 - Public computed names and return types come from `.computed(...)`.
 - Public query names, parameter types, and return types come from `.queries(...)`.
+- `observe(change)` types come from `.observe(...)`, and `patches`/`inversePatches` are present when that call uses `{ patches: true }`.
 - Public action names, parameter types, and return types come from `.actions(...)`.
 - `setup(...args)` argument types come from the first `.setup(...)` call and later setup calls reuse that same argument list.
 - `get(key)` signal types come from `TState` and from the return types declared by `.computed(...)`.
@@ -136,7 +139,7 @@ A sigma-state instance exposes:
 
 Behavior:
 
-- `.defaultState(...)`, `.setup(...)`, `.computed(...)`, `.queries(...)`, and `.actions(...)` all mutate the same builder and return it
+- `.defaultState(...)`, `.setup(...)`, `.computed(...)`, `.queries(...)`, `.observe(...)`, and `.actions(...)` all mutate the same builder and return it
 - those builder methods are additive and may be called in any order
 - builder method typing only exposes state helpers that existed when that builder call happened
 - runtime contexts use the full accumulated builder, including definitions added by later builder calls
@@ -205,6 +208,24 @@ Behavior:
 - action typing only exposes computeds, queries, and actions that were already present when its `.actions(...)` call happened
 
 Nested sigma states stored in state stay usable as values. Actions do not proxy direct mutation into a nested sigma state's internals.
+
+## `observe`
+
+Observers are added with `.observe(listener, options?)`.
+
+Behavior:
+
+- each observer runs after a successful action commit that changes base state
+- observers do not run for actions that leave base state unchanged
+- `change.state` is the committed base-state snapshot for that action
+- `change.previousState` is the base-state snapshot from before that action started
+- `this` inside an observer exposes readonly state, computeds, and queries
+- observers do not receive action methods or `emit(...)` on `this`
+- nested action calls produce one observer notification after the outer action commits
+- patch generation is opt-in with `{ patches: true }`
+- when patch generation is enabled, `change.patches` and `change.inversePatches` come from Immer
+- applications are responsible for calling `enablePatches()` before using observer patch generation
+- observer typing only exposes computeds and queries that were already present when that `.observe(...)` call happened
 
 ## `setup`
 

@@ -1,4 +1,5 @@
 import { computed } from "@preact/signals";
+import { enablePatches } from "immer";
 import { assert, test } from "vitest";
 
 import { listen, query, ref, SigmaType, type SigmaState } from "preact-sigma";
@@ -201,6 +202,114 @@ test("actions reuse one draft and can call queries, computeds, and other actions
   assert.equal(counter.count, 2);
   assert.equal(counter.doubled, 4);
   assert.equal(counter.isEven(), true);
+});
+
+test("observe runs after committed base-state changes", () => {
+  const observed: Array<{
+    count: number;
+    doubled: number;
+    hasCount: boolean;
+    previousCount: number;
+    stateCount: number;
+  }> = [];
+
+  const Counter = new SigmaType<{ count: number }>()
+    .defaultState({
+      count: 0,
+    })
+    .computed({
+      doubled() {
+        return this.count * 2;
+      },
+    })
+    .queries({
+      hasCount() {
+        return this.count > 0;
+      },
+    })
+    .observe(function (change) {
+      observed.push({
+        count: this.count,
+        doubled: this.doubled,
+        hasCount: this.hasCount(),
+        previousCount: change.previousState.count,
+        stateCount: change.state.count,
+      });
+    })
+    .actions({
+      increment() {
+        this.count += 1;
+      },
+      incrementTwice() {
+        this.increment();
+        this.increment();
+      },
+      noop() {},
+    });
+
+  const counter = new Counter();
+
+  counter.noop();
+  assert.deepEqual(observed, []);
+
+  counter.incrementTwice();
+
+  assert.deepEqual(observed, [
+    {
+      count: 2,
+      doubled: 4,
+      hasCount: true,
+      previousCount: 0,
+      stateCount: 2,
+    },
+  ]);
+});
+
+test("observe can include immer patches when enabled by the app", () => {
+  enablePatches();
+
+  const observed: Array<{
+    inversePatches: unknown[];
+    patches: unknown[];
+  }> = [];
+
+  const Search = new SigmaType<{
+    draft: string;
+    tags: string[];
+  }>()
+    .defaultState({
+      draft: "",
+      tags: [],
+    })
+    .observe(
+      (change) => {
+        observed.push({
+          inversePatches: [...change.inversePatches],
+          patches: [...change.patches],
+        });
+      },
+      { patches: true },
+    )
+    .actions({
+      update() {
+        this.draft = "hello";
+        this.tags.push("sigma");
+      },
+    });
+
+  const search = new Search();
+
+  search.update();
+
+  assert.lengthOf(observed, 1);
+  assert.sameDeepMembers(observed[0].inversePatches, [
+    { op: "replace", path: ["draft"], value: "" },
+    { op: "remove", path: ["tags", 0] },
+  ]);
+  assert.sameDeepMembers(observed[0].patches, [
+    { op: "replace", path: ["draft"], value: "hello" },
+    { op: "add", path: ["tags", 0], value: "sigma" },
+  ]);
 });
 
 test("external query helpers isolate caller tracking", () => {

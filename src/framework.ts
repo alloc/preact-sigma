@@ -1,5 +1,5 @@
 import { computed, type ReadonlySignal, Signal, signal } from "@preact/signals";
-import { createDraft, finishDraft, freeze, isDraftable } from "immer";
+import { createDraft, finishDraft, freeze, isDraftable, type Patch } from "immer";
 import { Draft, Immutable } from "./immer";
 
 export { action, computed, effect } from "@preact/signals";
@@ -139,6 +139,20 @@ export type AnySigmaStateWithEvents<TEvents extends AnyEvents> = AnySigmaState &
   readonly [sigmaEventsBrand]: TEvents;
 };
 
+export type SigmaObserveOptions = {
+  patches?: boolean;
+};
+
+export type SigmaObserveChange<TState extends AnyState, TWithPatches extends boolean = false> = {
+  readonly previousState: Immutable<TState>;
+  readonly state: Immutable<TState>;
+} & (TWithPatches extends true
+  ? {
+      readonly inversePatches: readonly Patch[];
+      readonly patches: readonly Patch[];
+    }
+  : {});
+
 export function isSigmaState(value: unknown): value is AnySigmaState {
   return Boolean(value && typeof value === "object" && (value as AnySigmaState)[sigmaStateBrand]);
 }
@@ -189,11 +203,21 @@ type SigmaTypeInternals = {
   computeds: Record<string, AnyFunction>;
   defaultState: Record<string, unknown>;
   defaultStateKeys: string[];
+  observeFunctions: Array<{
+    listener: AnyFunction;
+    patches: boolean;
+  }>;
   queries: Record<string, AnyFunction>;
   setupFunctions: AnyFunction[];
 };
 
-type ContextKind = "action" | "computedDraftAware" | "computedReadonly" | "query" | "setup";
+type ContextKind =
+  | "action"
+  | "computedDraftAware"
+  | "computedReadonly"
+  | "observe"
+  | "query"
+  | "setup";
 
 type SigmaInstance = {
   currentDraft?: Draft<AnyState>;
@@ -209,6 +233,7 @@ const dirtyContexts: Record<ContextKind, Set<object>> = {
   action: new Set(),
   computedDraftAware: new Set(),
   computedReadonly: new Set(),
+  observe: new Set(),
   query: new Set(),
   setup: new Set(),
 };
@@ -220,6 +245,7 @@ const contextCache: Record<ContextKind, WeakMap<object, object>> = {
   action: new WeakMap(),
   computedDraftAware: new WeakMap(),
   computedReadonly: new WeakMap(),
+  observe: new WeakMap(),
   query: new WeakMap(),
   setup: new WeakMap(),
 };
@@ -332,6 +358,13 @@ const ContextOptions = {
     draftAware: true,
     liveComputeds: true,
   },
+  observe: {
+    allowActions: false,
+    allowEmit: false,
+    allowQueries: true,
+    draftAware: false,
+    liveComputeds: false,
+  },
   setup: {
     allowActions: true,
     allowEmit: true,
@@ -437,23 +470,45 @@ function runAction(
   const draft = createDraft(baseState);
   instance.currentDraft = draft;
 
-  let succeeded = false;
+  let ok = false;
   try {
     const result = actionFn.apply(actionContext, args);
-    succeeded = true;
+    ok = true;
     return result;
   } finally {
     const currentDraft = instance.currentDraft;
     instance.currentDraft = undefined;
-    if (succeeded) {
-      const nextState = finishDraft(currentDraft);
+
+    if (ok) {
+      let patches: Patch[] | undefined;
+      let inversePatches: Patch[] | undefined;
+
+      const nextState = instance.type.observeFunctions.some((observer) => observer.patches)
+        ? finishDraft(currentDraft, (nextPatches, nextInversePatches) => {
+            patches = nextPatches;
+            inversePatches = nextInversePatches;
+          })
+        : finishDraft(currentDraft);
+
       if (nextState !== baseState) {
         for (const key of instance.stateKeys) {
           const value = nextState[key];
-          if (value !== null && typeof value === "object" && !sigmaRefs.has(value)) {
+          if (isDraftable(value) && !sigmaRefs.has(value as object)) {
             freeze(value);
           }
           updateSignal(instance, key, value);
+        }
+
+        if (instance.type.observeFunctions.length) {
+          const change: SigmaObserveChange<AnyState, true> = {
+            previousState: baseState,
+            state: nextState,
+            inversePatches: inversePatches!,
+            patches: patches!,
+          };
+          for (const observer of instance.type.observeFunctions) {
+            observer.listener.call(getContext(instance, "observe"), change);
+          }
         }
       }
     }
@@ -619,6 +674,7 @@ export class SigmaType<
       computeds: Object.create(null),
       defaultState: Object.create(null),
       defaultStateKeys: [],
+      observeFunctions: [],
       queries: Object.create(null),
       setupFunctions: [],
     };
@@ -632,7 +688,10 @@ export class SigmaType<
       },
     };
 
-    Object.setPrototypeOf(SigmaTypeBuilder, SigmaType.prototype);
+    const { constructor: _constructor, ...builderDescriptors } = Object.getOwnPropertyDescriptors(
+      SigmaType.prototype,
+    );
+    Object.defineProperties(SigmaTypeBuilder, builderDescriptors);
     builderStates.set(SigmaTypeBuilder, type);
 
     return SigmaTypeBuilder as unknown as SigmaType<
@@ -724,6 +783,37 @@ export class SigmaType<
       TDefaults,
       TComputeds,
       MergeObjects<TQueries, TNextQueries>,
+      TActions,
+      TSetupArgs
+    >;
+  }
+
+  observe(
+    listener: (
+      this: ReadonlyContext<TState, TComputeds, TQueries>,
+      change: SigmaObserveChange<TState>,
+    ) => void,
+    options?: SigmaObserveOptions & { patches?: false | undefined },
+  ): SigmaType<TState, TEvents, TDefaults, TComputeds, TQueries, TActions, TSetupArgs>;
+  observe(
+    listener: (
+      this: ReadonlyContext<TState, TComputeds, TQueries>,
+      change: SigmaObserveChange<TState, true>,
+    ) => void,
+    options: SigmaObserveOptions & { patches: true },
+  ): SigmaType<TState, TEvents, TDefaults, TComputeds, TQueries, TActions, TSetupArgs>;
+  observe(listener: AnyFunction, options?: SigmaObserveOptions) {
+    const builderState = getBuilderState(this);
+    builderState.observeFunctions.push({
+      patches: Boolean(options?.patches),
+      listener,
+    });
+    return this as unknown as SigmaType<
+      TState,
+      TEvents,
+      TDefaults,
+      TComputeds,
+      TQueries,
       TActions,
       TSetupArgs
     >;
