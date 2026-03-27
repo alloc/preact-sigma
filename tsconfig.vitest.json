@@ -1,6 +1,5 @@
 {
   "compilerOptions": {
-    "composite": true,
     "strict": true,
     "types": ["node"],
     "lib": ["dom", "esnext"],
@@ -13,7 +12,7 @@
       "preact-sigma": ["./src/index.ts"]
     },
     "allowImportingTsExtensions": true,
-    "emitDeclarationOnly": true,
+    "noEmit": true,
     "rootDir": "."
   },
   "include": ["tests", "src"]

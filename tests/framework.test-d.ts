@@ -1,169 +1,164 @@
-import type { ReadonlySignal } from "@preact/signals";
 import { assertType, expectTypeOf, test } from "vitest";
 
-import {
-  defineManagedState,
-  type Lens,
-  query,
-  type StateHandle,
-  useManagedState,
-} from "preact-sigma";
+import { action, query, ref, SigmaType, type SigmaState } from "preact-sigma";
 
-type HasKey<T, K extends PropertyKey> = K extends keyof T ? true : false;
+test("sigma infers public state from the two-step declaration", () => {
+  type Todo = {
+    id: string;
+    title: string;
+    completed: boolean;
+  };
 
-test("state handles expose the expected type surface", () => {
-  expectTypeOf<StateHandle<{ query: string }>["query"]>().toEqualTypeOf<Lens<string>>();
-  expectTypeOf<HasKey<StateHandle<number>, "query">>().toEqualTypeOf<false>();
-  expectTypeOf<HasKey<StateHandle<string[]>, 0>>().toEqualTypeOf<false>();
+  type TodoEvents = {
+    added: Todo;
+    reset: void;
+  };
 
-  const identityQuery = query((value: number) => value);
-  expectTypeOf(identityQuery).toEqualTypeOf<(value: number) => number>();
+  type TodoListComputeds = {
+    completedCount(): number;
+  };
 
-  // @ts-expect-error query callbacks are closure-based and do not use `this`
-  query(function (this: { count: number }) {
-    return this.count;
-  });
-});
+  type TodoListQueries = {
+    canAdd(): boolean;
+  };
 
-test("managed state instances expose the inferred public API", () => {
-  const SearchManager = defineManagedState(
-    (search: StateHandle<{ query: string }>) => ({
-      query: search.query,
-    }),
-    { query: "" },
-  );
+  type TodoListActions = {
+    clear(): void;
+    setDraft(draft: string): void;
+  };
 
-  const search = new SearchManager();
-  assertType<string>(search.query);
-  assertType<ReadonlySignal<string>>(search.get("query"));
-  assertType<string>(search.peek("query"));
-  assertType<ReadonlySignal<{ query: string }>>(search.get());
-
-  const CounterManager = defineManagedState(
-    (counter: StateHandle<{ count: number }>) => ({
-      counter,
-      increment() {
-        counter.count.set((value) => value + 1);
-      },
-    }),
-    { count: 0 },
-  );
-
-  const DashboardManager = defineManagedState(
-    (dashboard: StateHandle<{ ready: boolean }>) => {
-      const child = new CounterManager();
-
-      return {
-        dashboard,
-        child,
-        toggleReady() {
-          dashboard.ready.set((ready) => !ready);
-        },
-      };
+  const todoListComputeds: TodoListComputeds = {
+    completedCount() {
+      return 0;
     },
-    { ready: false },
-  );
+  };
 
-  const dashboard = new DashboardManager();
-  dashboard.child.increment();
+  const todoListQueries: TodoListQueries = {
+    canAdd() {
+      return true;
+    },
+  };
 
-  assertType<number>(dashboard.child.counter.count);
-  assertType<boolean>(dashboard.dashboard.ready);
-  assertType<typeof dashboard.child>(dashboard.peek().child);
-  assertType<typeof dashboard.child>(dashboard.get().value.child);
+  const todoListActions: TodoListActions = {
+    setDraft(draft: string) {
+      void draft;
+    },
+    clear() {},
+  };
 
-  const StatusManager = defineManagedState(
-    (status: StateHandle<"idle" | "busy">) => ({
-      status,
+  const TodoList = new SigmaType<
+    {
+      draft: string;
+      todos: Todo[];
+    },
+    TodoEvents
+  >()
+    .defaultState({
+      draft: "",
+      todos: [],
+    })
+    .computed(todoListComputeds)
+    .setup(function (prefix: string) {
+      void prefix;
+      return [];
+    })
+    .queries(todoListQueries)
+    .actions(todoListActions);
+
+  const todoList = new TodoList();
+
+  assertType<string>(todoList.draft);
+  assertType<readonly Todo[]>(todoList.todos);
+  assertType<number>(todoList.completedCount);
+  assertType<boolean>(todoList.canAdd());
+  assertType<void>(todoList.setDraft("next"));
+  assertType<() => void>(todoList.setup("id"));
+  assertType<() => void>(todoList.on("reset", () => {}));
+  assertType<() => void>(
+    todoList.on("added", (todo) => {
+      expectTypeOf(todo).toEqualTypeOf<Todo>();
     }),
-    "idle",
   );
+  assertType<
+    SigmaState<{
+      state: {
+        draft: string;
+        todos: Todo[];
+      };
+      events: TodoEvents;
+      computeds: TodoListComputeds;
+      queries: TodoListQueries;
+      actions: TodoListActions;
+      setupArgs: [prefix: string];
+    }>
+  >(todoList);
 
-  const status = new StatusManager();
-  assertType<"idle" | "busy">(status.status);
-  assertType<() => void>(status.dispose);
-  assertType<() => void>(status[Symbol.dispose]);
+  const explicitAction = action((count: number) => count + 1);
+  expectTypeOf(explicitAction).toEqualTypeOf<(count: number) => number>();
 
-  useManagedState(
-    (value: StateHandle<{ query: string }>) => ({
-      query: value.query,
-    }),
-    () => ({ query: "" }),
-  );
-});
+  const hasText = query((value: string) => value.length > 0);
+  expectTypeOf(hasText).toEqualTypeOf<(value: string) => boolean>();
 
-test("managed state types reject invalid API usage", () => {
-  const CounterManager = defineManagedState(
-    (counter: StateHandle<{ count: number }>) => ({
-      counter,
-    }),
-    { count: 0 },
-  );
+  assertType<{ count: number }>(ref({ count: 1 }));
+  assertType<string[]>(ref(["a"]));
+  assertType<Map<string, number>>(ref(new Map<string, number>()));
+  assertType<Set<string>>(ref(new Set<string>()));
 
-  const DashboardManager = defineManagedState(
-    (dashboard: StateHandle<{ ready: boolean }>) => ({
-      dashboard,
-      child: new CounterManager(),
-    }),
-    { ready: false },
-  );
+  // @ts-expect-error ref only accepts plain objects, arrays, maps, and sets
+  ref(123);
 
-  const dashboard = new DashboardManager();
+  const Search = new SigmaType<{ count: number }>().defaultState({
+    count: 0,
+  });
 
-  // @ts-expect-error keyed APIs only accept signal-backed properties
-  dashboard.get("child");
-  // @ts-expect-error keyed APIs only accept signal-backed properties
-  dashboard.peek("child");
-  // @ts-expect-error keyed APIs only accept signal-backed properties
-  dashboard.subscribe("child", () => {});
+  assertType<number>(new Search().count);
 
-  defineManagedState(
-    (value: StateHandle<{ query: string }>) => ({
-      value,
-    }),
-    // @ts-expect-error initial state must extend the inferred state type
-    { query: 123 },
-  );
+  const Generated = new SigmaType<{
+    id: number;
+    tags: string[];
+  }>().defaultState({
+    id: () => 1,
+    tags: () => ["a"],
+  });
 
-  useManagedState(
-    (value: StateHandle<{ query: string }>) => ({
-      value,
-    }),
-    // @ts-expect-error lazy initial state must extend the inferred state type
-    () => ({ query: 123 }),
-  );
-});
+  const generated = new Generated();
 
-test("state handles accept supported owned resources", () => {
-  const CounterManager = defineManagedState(
-    (counter: StateHandle<{ count: number }>) => ({
-      counter,
-    }),
-    { count: 0 },
-  );
+  assertType<number>(generated.id);
+  assertType<readonly string[]>(generated.tags);
 
-  const OwningManager = defineManagedState((handle: StateHandle<{}>) => {
-    const child = new CounterManager();
+  new SigmaType<{ count: number }>().defaultState({
+    // @ts-expect-error initializer result must match the state property type
+    count: () => "wrong",
+  });
 
-    handle.own(() => {});
-    handle.own(child);
-    handle.own({
-      [Symbol.dispose]() {},
+  new SigmaType<{ count: number }>()
+    // @ts-expect-error setup handlers must return arrays of cleanup resources
+    .setup(function () {
+      return () => {};
     });
-    handle.own([
-      () => {},
-      child,
-      {
-        [Symbol.dispose]() {},
+});
+
+test("inline builder methods infer this for state reads", () => {
+  new SigmaType<{ count: number }>()
+    .defaultState({
+      count: 0,
+    })
+    .computed({
+      doubled() {
+        assertType<number>(this.count);
+        return this.count * 2;
       },
-    ]);
-
-    return {
-      child,
-    };
-  }, {});
-
-  const owning = new OwningManager();
-  owning.dispose();
-  owning[Symbol.dispose]();
+    })
+    .queries({
+      hasCount() {
+        assertType<number>(this.count);
+        return this.count > 0;
+      },
+    })
+    .actions({
+      increment() {
+        assertType<number>(this.count);
+        this.count += 1;
+      },
+    });
 });

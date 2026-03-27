@@ -2,366 +2,297 @@
 
 ## Glossary
 
-- `base state`: The private mutable state owned by one managed state definition. It may be any non-function value, including a primitive.
-- `public state`: The immutable data exposed on a managed state instance. It is derived from returned signals, returned top-level lenses, returned handles, and returned nested managed states.
-- `managed state`: An instance created by `defineManagedState()` or returned by `useManagedState()`. It exposes immutable public data, public methods, subscriptions, events, and disposal.
-- `manager class`: The class returned by `defineManagedState()`. Best practice is to name it with a `Manager` suffix.
-- `constructor`: The function passed to `defineManagedState()` or `useManagedState()`. It receives a typed `StateHandle`.
-- `handle`: The first constructor parameter. Its type must be `StateHandle<...>`. It is the private control surface for reading, writing, owning resources, and emitting.
-- `lens`: A constructor-local object for one top-level property of an object-shaped base state. A lens has `get()` and `set()`.
-- `signal`: A `ReadonlySignal` from `@preact/signals`.
-- `signal-backed public property`: A public property backed by a returned signal, returned lens, or returned handle. Keyed `get`, `peek`, and `subscribe` target only these properties.
-- `derived value`: A value computed from state rather than stored directly.
-- `public action`: A returned method intended to change state. Returned methods are action-wrapped by default.
-- `query method`: A returned method wrapped with `query()`. Query methods are tracked reads and are not action-wrapped.
-- `event map`: A type mapping event names to zero-or-one-argument tuples, for example `{ saved: []; selected: [{ id: string }] }`.
-- `cleanup`: A function of type `() => void`.
-- `disposable`: An object with a `[Symbol.dispose]()` method.
-- `owned resource`: A cleanup function or disposable registered through `handle.own()`.
-- `object-shaped state`: A base state that is a plain object. It is not a function, array, `Map`, or `Set`.
-- `top-level property`: A direct property on an object-shaped base state, such as `query` in `{ query: string }`.
-- `composition`: Returning one managed state instance from another managed state constructor so the nested instance is exposed unchanged as a public property.
-- `tracked read`: A read that participates in Signals tracking.
-- `untracked read`: A read that does not participate in Signals tracking.
-- `unsubscribe`: The cleanup function returned by `.on()` and `.subscribe()`.
+- `sigma type`: The builder returned by `new SigmaType<...>()`. It is also the constructor for sigma-state instances after configuration.
+- `sigma state`: An instance created from a configured sigma type.
+- `state property`: A top-level property from `TState`, such as `draft` in `{ draft: string }`.
+- `computed`: A tracked getter declared with `.computed({ ... })`.
+- `query`: A tracked method declared with `.queries({ ... })` or created with `query(fn)`.
+- `action`: A method declared with `.actions({ ... })` that reads and writes through one Immer draft for the whole call.
+- `setup handler`: A function declared with `.setup(fn)` that returns an array of cleanup resources.
+- `cleanup resource`: A cleanup function, an `AbortController`, or an object with `[Symbol.dispose]()`.
+- `signal access`: Reading the underlying `ReadonlySignal` for a state property or computed through `instance.get(key)`.
 
 ## Purpose
 
-`preact-sigma` is a small state-management layer built on top of `@preact/signals` and `immer`.
+`preact-sigma` is a class-builder state API built on top of `@preact/signals` and `immer`.
 
-It is designed to:
-
-- keep mutable implementation details private
-- expose immutable public data
-- express state transitions through public methods
-- support derived reactive values
-- support typed custom events
-- support composition of nested managed states
-- support instance-owned resource cleanup
+It gives each top-level state property its own signal, exposes readonly public state, supports tracked computed getters and queries, batches writes through actions, and provides explicit setup/cleanup.
 
 ## Runtime Exports
 
-All runtime functions must be imported directly from `preact-sigma`.
+Import APIs from `preact-sigma`.
 
 ```typescript
 import {
-  defineManagedState,
-  useManagedState,
-  useSubscribe,
-  useEventTarget,
-  isManagedState,
-  query,
+  SigmaType,
+  action,
   computed,
-  batch,
-  untracked
-} from 'preact-sigma';
+  effect,
+  isSigmaState,
+  listen,
+  query,
+  ref,
+  useListener,
+  useSigma,
+} from "preact-sigma";
 ```
 
-## Public Type Exports
+## Type Exports
 
-- `ManagedState`
-- `StateConstructor`
-- `StateHandle`
-- `Lens`
-- `SubscribeTarget`
+- `AnyDefaultState`
+- `AnyEvents`
+- `AnyResource`
+- `AnySigmaState`
+- `AnySigmaStateWithEvents`
+- `AnyState`
+- `InferEventType`
+- `InferSetupArgs`
+- `InferListener`
+- `SigmaRef`
+- `SigmaState`
 
-## Core Rules
+## Declaration Pattern
 
-- The first constructor parameter must be explicitly typed as `StateHandle<...>`.
-- The constructor should be side-effect free.
-- The constructor may return only:
-  - methods
-  - signals
-  - top-level lenses from the provided handle
-  - the provided handle itself
-  - a managed state instance
-- Event payloads may have zero or one argument only.
-- Returned methods are action-wrapped automatically unless wrapped with `query()`.
-- Returned signals and returned top-level lenses become tracked getter properties on the public instance.
-- Returning the handle exposes the full base state as one reactive immutable public property.
-- Returning a managed state instance exposes that nested managed state unchanged.
-- Keyed `get`, `peek`, and `subscribe` apply only to signal-backed public properties, not to composed managed-state properties.
+Use the incremental builder:
 
-## Core Examples
-
-### Defining a Manager Class
 ```typescript
-import { defineManagedState, query, type StateHandle } from 'preact-sigma';
+import { SigmaType } from "preact-sigma";
 
-type CounterState = { count: number; name: string };
-type CounterEvents = { maxReached: [] };
+type Todo = {
+  id: string;
+  title: string;
+  completed: boolean;
+};
 
-export const useCounterManager = defineManagedState(
-  (handle: StateHandle<CounterState, CounterEvents>, initialName: string) => {
-    // Top-level lenses
-    const { count, name } = handle;
+type TodoListState = {
+  draft: string;
+  todos: Todo[];
+};
 
-    return {
-      // Expose lenses as tracked getter properties
-      count,
-      name,
+type TodoListEvents = {
+  added: Todo;
+};
 
-      // Mutating Action (uses Immer producer under the hood)
-      increment() {
-        handle.set(draft => {
-          draft.count += 1;
-        });
+const TodoList = new SigmaType<TodoListState, TodoListEvents>()
+  .defaultState({
+    draft: "",
+    todos: [],
+  })
+  .computed({
+    completedCount() {
+      return this.todos.filter((todo) => todo.completed).length;
+    },
+  })
+  .queries({
+    canAddTodo() {
+      return this.draft.trim().length > 0;
+    },
+  })
+  .actions({
+    setDraft(draft: string) {
+      this.draft = draft;
+    },
+    addTodo() {
+      const todo = {
+        id: crypto.randomUUID(),
+        title: this.draft,
+        completed: false,
+      };
+      this.todos.push(todo);
+      this.draft = "";
+      this.emit("added", todo);
+    },
+  });
 
-        if (handle.peek().count >= 10) {
-          handle.emit('maxReached');
-        }
-      },
-
-      // Tracked read using query()
-      isEven: query(() => count.get() % 2 === 0),
-    };
-  },
-  { count: 0, name: 'Default' } // Initial State
-);
+const todoList = new TodoList();
 ```
 
-### Using in a Component
-```tsx
-import { useCounterManager } from './counter-manager';
+## Inference
 
-export function Counter() {
-  const manager = useCounterManager("My Counter");
+- `TState` and `TEvents` come from `new SigmaType<TState, TEvents>()`.
+- `defaultState` comes from `.defaultState(...)`, where each property may be either a value or a zero-argument initializer that returns the value.
+- Public computed names and return types come from `.computed(...)`.
+- Public query names, parameter types, and return types come from `.queries(...)`.
+- Public action names, parameter types, and return types come from `.actions(...)`.
+- `setup(...args)` argument types come from the first `.setup(...)` call and later setup calls reuse that same argument list.
+- `get(key)` signal types come from `TState` and from the return types declared by `.computed(...)`.
+- Do not pass explicit type arguments to the builder methods. Let inference come from each method input.
 
-  // Tracked reads in JSX (no .value needed!)
-  return (
-    <div>
-      <p>{manager.name}: {manager.count}</p>
-      <p>Is Even: {manager.isEven() ? 'Yes' : 'No'}</p>
-      <button onClick={() => manager.increment()}>+1</button>
-    </div>
-  );
-}
-```
+## Public Instance Shape
 
-## `defineManagedState()`
+A sigma-state instance exposes:
 
-Use `defineManagedState(constructor, initialState)` to create a reusable managed-state class.
+- one readonly property for every state property
+- one tracked getter for every computed
+- one method for every query
+- one method for every action
+- `get(key): ReadonlySignal<...>` for state-property and computed keys
+- `setup(...args): () => void` when the builder has at least one setup handler
+- `on(name, listener): () => void`
 
-Behavior:
+## `SigmaType`
 
-- `initialState` is the initial base state
-- constructor parameters after the handle become runtime constructor parameters for the class
-- internal state and event types are inferred from the typed `StateHandle` parameter
-- the resulting instance exposes immutable public data plus public methods
-- the resulting instance owns any resources registered through `handle.own()`
-
-## `useManagedState()`
-
-Use `useManagedState(constructor, initialState)` to create a managed state directly inside a component.
+`new SigmaType<TState, TEvents>()` creates a mutable, reusable sigma-state builder that is also the constructor for sigma-state instances after configuration.
 
 Behavior:
 
-- follows the same constructor rules as `defineManagedState()`
-- accepts either a concrete initial state or a lazy initializer function
-- returns one stable managed state instance for the component
+- `.defaultState(...)`, `.setup(...)`, `.computed(...)`, `.queries(...)`, and `.actions(...)` all mutate the same builder and return it
+- those builder methods are additive and may be called in any order
+- builder method typing only exposes state helpers that existed when that builder call happened
+- runtime contexts use the full accumulated builder, including definitions added by later builder calls
+- `defaultState` is optional and must be a plain object when provided
+- function-valued `defaultState` properties act as per-instance initializers, and their return values become the state values for that instance
+- constructor input must be a plain object when provided
+- constructor input shallowly overrides `defaultState`
+- if every required state property is covered by `defaultState`, constructor input is optional
+- duplicate names across state properties, computeds, queries, and actions are rejected at runtime
+- reserved public names are `get`, `setup`, `on`, and `emit`
 
-## `StateHandle`
+## Reactivity Model
 
-`StateHandle<TState, TEvents>` is the constructor-local control surface.
+- each top-level state property is backed by its own Preact signal
+- public state reads are reactive
+- computed getters are reactive and lazily memoized
+- queries are reactive at the call site, including queries with arguments
+- `get(key)` returns the underlying `ReadonlySignal` for a state property or computed
 
-Methods:
+## `get(key)`
 
-- `get()`: tracked read of the current immutable base state
-- `peek()`: untracked read of the current immutable base state
-- `set(next)`: replace the base state or update it with an Immer producer
-- `own(resources)`: attach cleanup functions or disposables to the managed state instance
-- `emit(name, arg?)`: emit a typed custom event with zero or one argument
-
-For object-shaped base state only:
-
-- each top-level property is available as a `Lens`
-- spreading the handle into the returned constructor object exposes all current top-level lenses as tracked public properties
-
-## `Lens`
-
-`Lens<T>` exists only on object-shaped `StateHandle`s.
-
-Methods:
-
-- `get()`: tracked read of that top-level property
-- `set(next)`: replace that property or update it with an Immer producer for that property
-
-Important:
-
-- lenses are constructor-local unless returned
-- returning one lens exposes one reactive public property
-- spreading an object-shaped handle exposes all current top-level lenses at once
-
-## `ManagedState`
-
-A managed state instance exposes:
-
-- immutable public data as normal properties
-- public methods returned by the constructor
-- subscription methods
-- event subscription methods
-- disposal methods
-
-Read APIs:
-
-- `get(key)`: return the underlying signal for one exposed signal-backed public property
-- `get()`: return the underlying signal for the whole public state
-- `peek(key)`: untracked read of one exposed signal-backed public property
-- `peek()`: untracked read of the whole public state
-
-Subscription APIs:
-
-- `subscribe(key, listener)`: subscribe to the current and future values of one exposed signal-backed public property
-- `subscribe(listener)`: subscribe to the current and future whole public state
-- both forms return an unsubscribe function
-
-Event API:
-
-- `on(name, listener)`: subscribe to one custom event
-- listener receives the emitted argument directly, or no argument at all
-- returns an unsubscribe function
-
-Disposal API:
-
-- `dispose()`: dispose the managed state instance and its owned resources
-- `[Symbol.dispose]()` does the same thing as `dispose()`
-
-## `query()`
-
-`query(fn)` marks a returned method as a tracked public read.
+`instance.get(key)` returns the underlying `ReadonlySignal` for one top-level state property or computed.
 
 Behavior:
 
-- wraps the method body in `computed()`
-- lets reads inside the method participate in Signals tracking after the method is exposed publicly
-- query functions read from closed-over handles or signals and do not use an instance receiver
-- skips the default `action()` wrapping step
-
-Use `query()` for public methods that conceptually answer a question.
-
-Do not use `query()` for ordinary mutating actions.
+- state-property keys return that property's signal
+- computed keys return that computed getter's signal
+- signal access is reactive, so reading `.value` tracks like any other Preact signal read
 
 ## `computed`
 
-`computed` is re-exported from `@preact/signals`.
-
-Use it when a public derived value should be memoized and reactive.
-
-## `batch`
-
-`batch` is re-exported from `@preact/signals`.
-
-Use it when multiple state updates should be grouped into one reactive batch.
-
-## `untracked`
-
-`untracked` is re-exported from `@preact/signals`.
-
-Use it when code must read reactive values without subscribing to them.
-
-## `useSubscribe()`
-
-Use `useSubscribe(target, listener)` inside a component.
+Computeds are added with `.computed({ ... })`.
 
 Behavior:
 
-- accepts any subscribable target, including a managed state or a Preact signal
-- keeps the listener fresh automatically
-- calls the listener immediately with the current value, then with future updates
-- does not take a dependency array
-- accepts `null` to disable the subscription temporarily
+- each computed is exposed as a tracked getter property
+- `this` inside a computed exposes readonly state plus other computeds
+- computeds do not receive query or action methods on `this`
+- computeds cannot accept arguments
 
-## `useEventTarget()`
+## `queries`
 
-Use `useEventTarget(target, name, listener)` inside a component.
+Queries are added with `.queries({ ... })`.
 
 Behavior:
 
-- accepts either a DOM-style `EventTarget` or a managed state
-- keeps the listener fresh automatically
-- does not take a dependency array
-- accepts `null` to disable the subscription temporarily
-- for managed-state events, the listener receives the emitted argument directly, or no argument at all
+- queries may accept arbitrary parameters
+- `this` inside a query exposes readonly state, computeds, and other queries
+- queries do not receive action methods on `this`
+- when a query runs inside an action, it reads from the current draft-aware state
+- query wrappers are shared across instances
+- query typing only exposes computeds and queries that were already present when its `.queries(...)` call happened
 
-## `isManagedState()`
+## `actions`
 
-Use `isManagedState(value)` to check whether a value is a managed-state instance.
+Actions are added with `.actions({ ... })`.
 
-## Supported Patterns
+Behavior:
 
-- primitive base state
-- plain-object base state
-- Immer producer updates
-- lifecycle-owned cleanup via `handle.own()`
-- disposal via `dispose()` or `[Symbol.dispose]()`
-- reactive derived properties via returned signals
-- tracked read methods via `query()`
-- public exposure of one top-level property via a returned lens
-- public exposure of all top-level properties via `...handle`
-- public exposure of the whole base state via the returned handle
-- nested managed-state composition
-- keyed and whole-state signal access
-- keyed and whole-state snapshot access
-- keyed and whole-state subscriptions
-- typed custom events with zero or one argument
-- component-local managed state via `useManagedState`
-- hook-based subscriptions via `useSubscribe`
-- hook-based event subscriptions via `useEventTarget`
-- async actions (await promises inside returned methods, then call `handle.set()` or `lens.set()`)
+- top-level state reads and writes go through one Immer draft for the whole action call
+- actions may call other actions, queries, and computeds
+- nested action calls reuse the current draft
+- successful actions freeze the resulting public state and write it back to per-property signals
+- actions can emit typed events with `this.emit(...)`
+- action wrappers are shared across instances
+- action typing only exposes computeds, queries, and actions that were already present when its `.actions(...)` call happened
 
-## Unsupported Or Disallowed Patterns
+Nested sigma states stored in state stay usable as values. Actions do not proxy direct mutation into a nested sigma state's internals.
 
-- function-valued base state
-- returning arbitrary plain objects from the constructor unless each returned property is one of the supported public shapes
-- multi-argument event payloads outside a single object payload
-- relying on untyped constructor parameters for state or event inference
-- using arrays, `Map`, or `Set` as object-shaped state for lens generation
+## `setup`
 
-## Best Practices
+Setup is added with `.setup(fn)`.
 
-### Inference And Naming
+Behavior:
 
-- Explicitly type the first constructor parameter as `StateHandle<...>`.
-- Prefer a `${ModelName}State` alias near the constructor, even for simple state.
-- Prefer a `${ModelName}Events` alias when events exist.
-- Name the class returned by `defineManagedState()` with a `Manager` suffix.
-- Name the handle like an instance of the state model, not a generic word like `state` or `value`.
+- setup is explicit; a new instance does not run setup automatically
+- each `.setup(...)` call adds another setup handler
+- `useSigma(...)` calls `.setup(...)` for component-owned instances that define setup
+- calling `.setup(...)` again cleans up the previous setup first
+- one `.setup(...)` call runs every registered setup handler in definition order
+- the public `.setup(...)` method always returns one cleanup function
+- `this` inside a setup handler exposes the public instance plus `emit(...)`
+- each setup handler returns an array of cleanup resources
+- setup typing only exposes computeds, queries, and actions that were already present when that `.setup(...)` call happened
 
-### State Shape And Exposure
+Supported cleanup resources:
 
-- Use top-level lenses for constructor-local reads and writes to top-level object fields.
-- Return one top-level lens when one public field should stay reactive.
-- Spread an object-shaped handle when the public managed state should mirror the base state's top-level shape.
-- Return the full handle only when the whole base state should be one public property.
-- Use `handle.own()` when the managed-state instance should control external cleanup.
+- cleanup functions
+- objects with `[Symbol.dispose]()`
+- `AbortController`
 
-### Derivations
+When a parent setup wants to own a nested sigma state's setup, call the child sigma state's `setup(...)` method and return that cleanup function.
 
-- Prefer plain external derivation functions for ordinary derived values so unused helpers can be tree-shaken.
-- Use `computed(() => derive(handle.get()))` only when a derived value needs memoized reactive reads for performance.
-- Use `query()` for tracked public read methods.
+Cleanup runs in reverse order. If multiple cleanup steps throw, cleanup rethrows an `AggregateError`.
 
-### Public API Design
+## Events
 
-- Keep public actions domain-specific.
-- Prefer verbs like `save`, `submit`, `open`, `close`, and `rename` over low-level mutation names.
-- Avoid unnecessary binding. Public methods work through closure over the typed handle, not through `this`.
-- Keep nested features as separate managed states when they already have a clean public API.
-- Prefer explicit disposal when a managed state owns external resources.
+Events are emitted from actions or setup through `this.emit(name, payload?)`.
 
-### Events
+Behavior:
 
-- Keep events domain-specific.
-- Do not use generic event names like `changed` or `updated` for ordinary state observation.
-- When you need multiple event fields, wrap them in one object payload.
+- the event map controls allowed event names and payload types
+- `void` events emit no payload
+- object events emit one payload object
+- `.on(name, listener)` returns an unsubscribe function
+- listeners receive the payload directly, or no argument for `void` events
 
-## Example Interpretation Rules For Agents
+## `ref`
 
-- If a snippet assigns `const stop = thing.on(...)`, `stop` is an unsubscribe function.
-- If a snippet assigns `const stop = thing.subscribe(...)`, `stop` is an unsubscribe function.
-- If a snippet calls `handle.own([...])`, those resources are released by `instance.dispose()` or `instance[Symbol.dispose]()`.
-- If a returned method is wrapped with `query()`, treat it as a tracked read, not a mutating action.
-- If a constructor returns `...handle`, treat each top-level object property as a public tracked property.
-- If a constructor returns `field: handle.someField`, treat `field` as a public tracked property whose value is the lens's current value, not as the lens object itself.
-- NEVER append `.value` when reading exposed signal-backed public properties on a manager instance (e.g., use `manager.count`, NOT `manager.count.value`). They are exposed as native getters.
-- When calling `handle.set(draft => ...)` or `lens.set(draft => ...)`, treat it exactly like an Immer producer. Mutate the `draft` directly. Do not return a completely new object from the callback unless you intend to entirely overwrite that state.
+`ref(value)` marks a plain object, array, `Map`, or `Set` so v2 does not freeze that top-level state value when it becomes public state.
+
+Behavior:
+
+- returns the same value that was passed in
+- accepts only a plain object, array, `Map`, or `Set`
+- keeps that top-level state value mutable by reference after public reads
+
+Use `ref(...)` for values like `Map`, `Set`, or mutable caches that should remain mutable without being copied or frozen.
+
+## `query(fn)`
+
+`query(fn)` creates a standalone tracked query helper.
+
+Behavior:
+
+- it returns a function with the same parameter and return types as `fn`
+- it evaluates `fn` inside a signal `computed(...)`
+- it does not use an instance receiver
+
+## `useSigma`
+
+`useSigma(create, setupParams?)` creates one sigma-state instance for a component and manages setup cleanup.
+
+Behavior:
+
+- calls `create()` once per mounted component instance
+- returns the same sigma-state instance for the component lifetime
+- if the sigma state defines setup, calls `sigmaState.setup(...setupParams)` in an effect
+- reruns setup when `setupParams` change
+- the cleanup returned by `setup(...)` runs when `setupParams` change or when the component unmounts
+
+## `listen`
+
+`listen(target, name, listener)` adds an event listener and returns a cleanup function.
+
+## `useListener`
+
+`useListener(target, name, listener)` attaches an event listener inside a component.
+
+Behavior:
+
+- subscribes in `useEffect`
+- unsubscribes automatically when `target` or `name` changes or when the component unmounts
+- keeps the latest listener callback without requiring it in the effect dependency list
+- passing `null` disables the listener
+
+## `isSigmaState`
+
+`isSigmaState(value)` checks whether a value is a sigma-state instance.

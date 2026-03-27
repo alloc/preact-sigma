@@ -1,516 +1,348 @@
+import { computed } from "@preact/signals";
 import { assert, test } from "vitest";
 
-import {
-  computed,
-  defineManagedState,
-  isManagedState,
-  query,
-  type StateHandle,
-} from "preact-sigma";
+import { listen, query, ref, SigmaType, type SigmaState } from "preact-sigma";
 
-test("top-level lenses read tracked values and update shallow properties", () => {
-  let searchHandle!: StateHandle<{
-    options: { exact: boolean };
-    query: string;
-  }>;
-
-  const SearchManager = defineManagedState(
-    (search: typeof searchHandle) => {
-      searchHandle = search;
-
-      return {
-        search,
-      };
-    },
-    { options: { exact: false }, query: "" },
-  );
-
-  const search = new SearchManager();
-  const queryLength = computed(() => searchHandle.query.get().length);
-
-  assert.equal(queryLength.value, 0);
-  assert.equal(searchHandle.query.get(), "");
-
-  searchHandle.query.set("hello");
-  assert.equal(search.search.query, "hello");
-  assert.equal(queryLength.value, 5);
-
-  searchHandle.options.set((options) => {
-    options.exact = true;
-  });
-  assert.equal(search.search.options.exact, true);
-});
-
-test("returned top-level lenses become reactive public properties", () => {
-  let searchHandle!: StateHandle<{
-    options: { exact: boolean };
-    query: string;
-  }>;
-
-  const SearchManager = defineManagedState(
-    (search: typeof searchHandle) => {
-      searchHandle = search;
-
-      return {
-        query: search.query,
-      };
-    },
-    { options: { exact: false }, query: "" },
-  );
-
-  const search = new SearchManager();
-  const upperQuery = computed(() => search.query.toUpperCase());
-  const observedQueries: string[] = [];
-  const stop = search.subscribe("query", (query) => {
-    observedQueries.push(query);
-  });
-
-  assert.equal(search.query, "");
-  assert.equal(search.peek("query"), "");
-  assert.equal(search.get("query")?.value, "");
-  assert.equal(upperQuery.value, "");
-
-  searchHandle.query.set("hello");
-
-  assert.equal(search.query, "hello");
-  assert.equal(search.peek("query"), "hello");
-  assert.equal(search.get("query")?.value, "hello");
-  assert.equal(upperQuery.value, "HELLO");
-  assert.deepEqual(observedQueries, ["", "hello"]);
-
-  stop();
-});
-
-test("returned state handles become reactive public properties", () => {
-  const CounterManager = defineManagedState(
-    (count: StateHandle<number>) => ({
-      count,
-      increment() {
-        count.set((value) => value + 1);
-      },
-    }),
-    0,
-  );
-
-  const counter = new CounterManager();
-  const doubledCount = computed(() => counter.count * 2);
-  const observedCounts: number[] = [];
-  const stop = counter.subscribe("count", (count) => {
-    observedCounts.push(count);
-  });
-
-  assert.equal(counter.count, 0);
-  assert.equal(counter.peek("count"), 0);
-  assert.equal(counter.get("count")?.value, 0);
-  assert.equal(doubledCount.value, 0);
-
-  counter.increment();
-
-  assert.equal(counter.count, 1);
-  assert.equal(counter.peek("count"), 1);
-  assert.equal(counter.get("count")?.value, 1);
-  assert.equal(doubledCount.value, 2);
-  assert.deepEqual(observedCounts, [0, 1]);
-
-  stop();
-});
-
-test("returned computed signals become reactive public properties", () => {
-  const CounterManager = defineManagedState(
-    (count: StateHandle<number>) => ({
-      doubled: computed(() => count.get() * 2),
-      increment() {
-        count.set((value) => value + 1);
-      },
-    }),
-    0,
-  );
-
-  const counter = new CounterManager();
-  const observedValues: number[] = [];
-  const stop = counter.subscribe("doubled", (value) => {
-    observedValues.push(value);
-  });
-
-  assert.equal(counter.doubled, 0);
-  assert.equal(counter.peek("doubled"), 0);
-  assert.equal(counter.get("doubled")?.value, 0);
-  assert.equal(counter.get().value.doubled, 0);
-
-  counter.increment();
-
-  assert.equal(counter.doubled, 2);
-  assert.equal(counter.peek("doubled"), 2);
-  assert.equal(counter.get("doubled")?.value, 2);
-  assert.equal(counter.get().value.doubled, 2);
-  assert.deepEqual(observedValues, [0, 2]);
-
-  stop();
-});
-
-test("subscriptions emit the current value immediately", () => {
-  const CounterManager = defineManagedState(
-    (counter: StateHandle<{ count: number }>) => ({
-      count: counter.count,
-      increment() {
-        counter.count.set((value) => value + 1);
-      },
-    }),
-    { count: 0 },
-  );
-
-  const counter = new CounterManager();
-  const observedCounts: number[] = [];
-  const observedSnapshots: number[] = [];
-
-  const stopCount = counter.subscribe("count", (count) => {
-    observedCounts.push(count);
-  });
-  const stopState = counter.subscribe((value) => {
-    observedSnapshots.push(value.count);
-  });
-
-  assert.deepEqual(observedCounts, [0]);
-  assert.deepEqual(observedSnapshots, [0]);
-
-  counter.increment();
-
-  assert.deepEqual(observedCounts, [0, 1]);
-  assert.deepEqual(observedSnapshots, [0, 1]);
-
-  stopCount();
-  stopState();
-});
-
-test("events deliver payloads and unsubscribe cleanly", () => {
-  type TodoEvents = {
-    saved: [];
-    selected: [{ id: string }];
+test("sigma states expose readonly state, computeds, queries, and actions", () => {
+  type Todo = {
+    id: string;
+    title: string;
+    completed: boolean;
   };
 
-  const TodoManager = defineManagedState(
-    (todo: StateHandle<{}, TodoEvents>) => ({
-      save() {
-        todo.emit("saved");
+  type TodoListState = {
+    draft: string;
+    todos: Todo[];
+  };
+
+  type TodoListEvents = {
+    added: Todo;
+  };
+
+  const TodoList = new SigmaType<TodoListState, TodoListEvents>()
+    .defaultState({
+      draft: "",
+      todos: [],
+    })
+    .computed({
+      completedCount() {
+        return this.todos.filter((todo) => todo.completed).length;
       },
-      select(id: string) {
-        todo.emit("selected", { id });
+    })
+    .queries({
+      canAddTodo() {
+        return this.draft.trim().length > 0;
       },
-    }),
-    {},
-  );
-
-  const todo = new TodoManager();
-  let savedCount = 0;
-  const selectedIds: string[] = [];
-  const stopSaved = todo.on("saved", () => {
-    savedCount += 1;
-  });
-  const stopSelected = todo.on("selected", (event) => {
-    selectedIds.push(event.id);
-  });
-
-  todo.save();
-  todo.select("a");
-
-  stopSaved();
-  stopSelected();
-
-  todo.save();
-  todo.select("b");
-
-  assert.equal(savedCount, 1);
-  assert.deepEqual(selectedIds, ["a"]);
-});
-
-test("state handles update object state with Immer producers", () => {
-  let searchHandle!: StateHandle<{
-    page: number;
-    query: string;
-  }>;
-
-  const SearchManager = defineManagedState(
-    (search: typeof searchHandle) => {
-      searchHandle = search;
-
-      return {
-        query: search.query,
-        setQuery(query: string) {
-          search.set((draft) => {
-            draft.page += 1;
-            draft.query = query;
-          });
-        },
-      };
-    },
-    { page: 1, query: "" },
-  );
-
-  const search = new SearchManager();
-
-  search.setQuery("hello");
-
-  assert.equal(search.query, "hello");
-  assert.deepEqual(searchHandle.get(), { page: 2, query: "hello" });
-  assert.equal(search.peek().query, "hello");
-  assert.equal(search.get().value.query, "hello");
-  assert.deepEqual(searchHandle.peek(), { page: 2, query: "hello" });
-});
-
-test("spreading a state handle exposes top-level lenses without handle methods", () => {
-  let searchHandle!: StateHandle<{
-    options: { exact: boolean };
-    query: string;
-  }>;
-
-  const SearchManager = defineManagedState(
-    (search: typeof searchHandle) => {
-      searchHandle = search;
-
-      return {
-        ...search,
-      };
-    },
-    { options: { exact: false }, query: "" },
-  );
-
-  const search = new SearchManager();
-
-  assert.equal(search.query, "");
-  assert.equal(search.options.exact, false);
-  assert.equal(Object.hasOwn(search, "set"), false);
-
-  searchHandle.query.set("hello");
-  searchHandle.options.set((options) => {
-    options.exact = true;
-  });
-
-  assert.equal(search.query, "hello");
-  assert.equal(search.options.exact, true);
-});
-
-test("keyed subscriptions reject non-signal public properties", () => {
-  const CounterManager = defineManagedState(
-    (count: StateHandle<number>) => ({
-      count,
-    }),
-    0,
-  );
-
-  const DashboardManager = defineManagedState(
-    (dashboard: StateHandle<{ ready: boolean }>) => ({
-      ready: dashboard.ready,
-      child: new CounterManager(),
-    }),
-    { ready: false },
-  );
-
-  const dashboard = new DashboardManager();
-
-  assert.throws(
-    () => dashboard.subscribe("child" as never, () => {}),
-    /Property child is not a signal/,
-  );
-});
-
-test("composed managed states pass through unchanged", () => {
-  const CounterManager = defineManagedState(
-    (count: StateHandle<number>) => ({
-      count,
-      increment() {
-        count.set((value) => value + 1);
+    })
+    .actions({
+      addTodo() {
+        const todo = {
+          id: String(this.todos.length + 1),
+          title: this.draft,
+          completed: false,
+        };
+        this.todos.push(todo);
+        this.draft = "";
+        this.emit("added", todo);
       },
-    }),
-    0,
-  );
-
-  const DashboardManager = defineManagedState(
-    (dashboard: StateHandle<{ ready: boolean }>) => {
-      const counter = new CounterManager();
-
-      return {
-        dashboard,
-        counter,
-        toggleReady() {
-          dashboard.ready.set((ready) => !ready);
-        },
-      };
-    },
-    { ready: false },
-  );
-
-  const dashboard = new DashboardManager();
-  const snapshots: Array<{ counter: InstanceType<typeof CounterManager> }> = [];
-  const unsubscribe = dashboard.subscribe((value) => {
-    snapshots.push(value);
-  });
-  const baselineSnapshotCount = snapshots.length;
-
-  assert.equal(isManagedState(dashboard.counter), true);
-  assert.equal(dashboard.peek().counter, dashboard.counter);
-
-  dashboard.counter.increment();
-  assert.equal(dashboard.counter.count, 1);
-  assert.equal(snapshots.length, baselineSnapshotCount);
-
-  dashboard.toggleReady();
-  assert.equal(snapshots.length, baselineSnapshotCount + 1);
-  assert.equal(snapshots.at(-1)?.counter, dashboard.counter);
-
-  unsubscribe();
-});
-
-test("query methods keep signal tracking when they read state", () => {
-  const CounterManager = defineManagedState(
-    (count: StateHandle<number>) => ({
-      count,
-      readCount: query(() => count.get()),
-      readCountUntracked() {
-        return count.get();
+      setDraft(draft: string) {
+        this.draft = draft;
       },
-      increment() {
-        count.set((value) => value + 1);
+      toggleFirstTodo() {
+        this.todos[0].completed = !this.todos[0].completed;
       },
-    }),
-    0,
-  );
-
-  const counter = new CounterManager();
-  const trackedCount = computed(() => counter.readCount());
-  const untrackedCount = computed(() => counter.readCountUntracked());
-
-  assert.equal(trackedCount.value, 0);
-  assert.equal(untrackedCount.value, 0);
-
-  counter.increment();
-
-  assert.equal(trackedCount.value, 1);
-  assert.equal(untrackedCount.value, 0);
-});
-
-test("state handle peek reads without tracking", () => {
-  const CounterManager = defineManagedState(
-    (count: StateHandle<number>) => ({
-      readCount: query(() => count.peek()),
-      increment() {
-        count.set((value) => value + 1);
-      },
-    }),
-    0,
-  );
-
-  const counter = new CounterManager();
-  const untrackedCount = computed(() => counter.readCount());
-
-  assert.equal(untrackedCount.value, 0);
-
-  counter.increment();
-
-  assert.equal(untrackedCount.value, 0);
-});
-test("owned resources are disposed in reverse order and aggregate errors", () => {
-  const steps: string[] = [];
-  const firstError = new Error("first");
-  const lastError = new Error("last");
-
-  const ChildManager = defineManagedState((child: StateHandle<number>) => {
-    child.own(() => {
-      steps.push("child cleanup");
     });
 
-    return {
-      child,
-    };
-  }, 0);
+  const todoList = new TodoList();
+  const observedCounts = computed(() => todoList.completedCount);
+  let addedTitle = "";
+  const stop = todoList.on("added", (todo) => {
+    addedTitle = todo.title;
+  });
 
-  const ParentManager = defineManagedState((parent: StateHandle<{}>) => {
-    const child = new ChildManager();
+  assert.equal(todoList.draft, "");
+  assert.equal(todoList.canAddTodo(), false);
 
-    parent.own([
-      () => {
-        steps.push("first cleanup");
-        throw firstError;
-      },
-      child,
-      {
-        [Symbol.dispose]() {
-          steps.push("last cleanup");
-          throw lastError;
-        },
-      },
-    ]);
+  todoList.setDraft("Ship v2");
 
-    return {
-      child,
-    };
-  }, {});
+  assert.equal(todoList.canAddTodo(), true);
 
-  const parent = new ParentManager();
-  let error: unknown;
+  todoList.addTodo();
 
-  try {
-    parent.dispose();
-  } catch (thrownError) {
-    error = thrownError;
-  }
+  assert.equal(addedTitle, "Ship v2");
+  assert.equal(todoList.draft, "");
+  assert.equal(todoList.todos[0].title, "Ship v2");
+  assert.equal(observedCounts.value, 0);
 
-  assert.equal(error instanceof AggregateError, true);
-  assert.deepEqual((error as AggregateError).errors, [lastError, firstError]);
+  todoList.toggleFirstTodo();
 
-  assert.deepEqual(steps, ["last cleanup", "child cleanup", "first cleanup"]);
+  assert.equal(todoList.completedCount, 1);
+  assert.equal(observedCounts.value, 1);
+  assert.throws(() => {
+    (todoList.todos as Todo[]).push({
+      id: "2",
+      title: "mutate",
+      completed: false,
+    });
+  });
 
-  parent.dispose();
-  assert.deepEqual(steps, ["last cleanup", "child cleanup", "first cleanup"]);
+  stop();
 });
 
-test("owned resources can be added after disposal and dispose immediately", () => {
-  let ownLate!: (
-    resources:
-      | (() => void)
-      | { [Symbol.dispose](): void }
-      | readonly ((() => void) | { [Symbol.dispose](): void })[],
-  ) => void;
-  const steps: string[] = [];
+test("setup returns a single cleanup that owns nested resources", () => {
+  const observedEvents: string[] = [];
+  const abortController = new AbortController();
+  const target = new EventTarget();
+  let functionCleanupCount = 0;
+  let disposableCleanupCount = 0;
+  let childCleanupCount = 0;
 
-  const Manager = defineManagedState((handle: StateHandle<{}>) => {
-    ownLate = handle.own;
+  const ChildState = new SigmaType<{ ready: boolean }>()
+    .defaultState({
+      ready: true,
+    })
+    .setup(function () {
+      return [
+        () => {
+          childCleanupCount += 1;
+        },
+      ];
+    });
 
-    return {
-      disposeLater() {
-        handle.own([
-          () => {
-            steps.push("late cleanup");
+  const ParentState = new SigmaType<{ ready: boolean }>()
+    .defaultState({
+      ready: false,
+    })
+    .setup(function () {
+      const child = new ChildState();
+      return [child.setup()];
+    })
+    .setup(function () {
+      const stop = listen(target, "sigma-v2-ping", () => {
+        observedEvents.push("ping");
+      });
+
+      return [
+        stop,
+        abortController,
+        () => {
+          functionCleanupCount += 1;
+        },
+        {
+          [Symbol.dispose]() {
+            disposableCleanupCount += 1;
           },
-        ]);
+        },
+      ];
+    });
+
+  const parent = new ParentState();
+  const cleanup = parent.setup();
+
+  target.dispatchEvent(new Event("sigma-v2-ping"));
+  cleanup();
+  target.dispatchEvent(new Event("sigma-v2-ping"));
+
+  assert.deepEqual(observedEvents, ["ping"]);
+  assert.equal(abortController.signal.aborted, true);
+  assert.equal(functionCleanupCount, 1);
+  assert.equal(disposableCleanupCount, 1);
+  assert.equal(childCleanupCount, 1);
+});
+
+test("setup handlers must return arrays", () => {
+  const Store = new SigmaType<{ count: number }>()
+    .defaultState({
+      count: 0,
+    })
+    .setup(function () {
+      return (() => {}) as unknown as [];
+    });
+
+  const store = new Store();
+
+  assert.throws(() => {
+    store.setup();
+  }, /must return an array/);
+});
+
+test("actions reuse one draft and can call queries, computeds, and other actions", () => {
+  const Counter = new SigmaType<{ count: number }>()
+    .defaultState({
+      count: 0,
+    })
+    .computed({
+      doubled() {
+        return this.count * 2;
       },
-    };
-  }, {});
+    })
+    .queries({
+      isEven() {
+        return this.count % 2 === 0;
+      },
+    })
+    .actions({
+      increment() {
+        this.count += 1;
+      },
+      incrementTwice() {
+        this.increment();
+        assert.equal(this.count, 1);
+        assert.equal(this.doubled, 2);
+        assert.equal(this.isEven(), false);
+        this.increment();
+      },
+    });
 
-  const manager = new Manager();
+  const counter = new Counter();
 
-  manager.dispose();
-  ownLate({
-    [Symbol.dispose]() {
-      steps.push("late disposable");
+  counter.incrementTwice();
+
+  assert.equal(counter.count, 2);
+  assert.equal(counter.doubled, 4);
+  assert.equal(counter.isEven(), true);
+});
+
+test("external query helpers isolate caller tracking", () => {
+  const hasText = query((value: string) => value.trim().length > 0);
+  const Search = new SigmaType<{ draft: string }>()
+    .defaultState({
+      draft: "",
+    })
+    .actions({
+      setDraft(value: string) {
+        this.draft = value;
+      },
+    });
+
+  const search = new Search();
+  const result = computed(() => hasText(search.draft));
+
+  assert.equal(result.value, false);
+  search.setDraft("hello");
+  assert.equal(result.value, true);
+});
+
+test("initial state shallowly overrides defaults", () => {
+  const Search = new SigmaType<{
+    page: number;
+    query: string;
+  }>().defaultState({
+    page: 1,
+    query: "",
+  });
+
+  const search = new Search({
+    query: "typed",
+  });
+
+  assert.equal(search.page, 1);
+  assert.equal(search.query, "typed");
+});
+
+test("function-valued defaults run once per instance when needed", () => {
+  let idDefaultCalls = 0;
+  let tagsDefaultCalls = 0;
+
+  const Search = new SigmaType<{
+    id: number;
+    tags: string[];
+  }>().defaultState({
+    id() {
+      idDefaultCalls += 1;
+      return idDefaultCalls;
+    },
+    tags: () => {
+      tagsDefaultCalls += 1;
+      return [];
     },
   });
-  ownLate([
-    () => {
-      steps.push("late array cleanup");
-    },
-    {
-      [Symbol.dispose]() {
-        steps.push("late array disposable");
-      },
-    },
-  ]);
-  manager.disposeLater();
-  manager[Symbol.dispose]();
 
-  assert.deepEqual(steps, [
-    "late disposable",
-    "late array disposable",
-    "late array cleanup",
-    "late cleanup",
-  ]);
+  const first = new Search();
+  const second = new Search();
+  const overridden = new Search({
+    id: 99,
+  });
+
+  assert.equal(first.id, 1);
+  assert.equal(second.id, 2);
+  assert.equal(overridden.id, 99);
+  assert.equal(idDefaultCalls, 2);
+  assert.equal(tagsDefaultCalls, 3);
+  assert.notStrictEqual(first.tags, second.tags);
+  assert.notStrictEqual(second.tags, overridden.tags);
+});
+
+test("nested sigma states can be stored in state without being mutated through actions", () => {
+  const Child = new SigmaType<{ count: number }>()
+    .defaultState({
+      count: 0,
+    })
+    .actions({
+      increment() {
+        this.count += 1;
+      },
+    });
+
+  const child = new Child();
+
+  const Parent = new SigmaType<{
+    child: SigmaState<{
+      state: { count: number };
+      actions: { increment(): void };
+      setupArgs: [];
+    }>;
+    label: string;
+  }>()
+    .defaultState({
+      child,
+      label: "parent",
+    })
+    .actions({
+      rename(label: string) {
+        this.label = label;
+      },
+    });
+
+  const parent = new Parent();
+
+  parent.rename("renamed");
+  parent.child.increment();
+
+  assert.equal(parent.label, "renamed");
+  assert.equal(parent.child.count, 1);
+});
+
+test("ref prevents freezing of top-level plain objects, arrays, maps, and sets", () => {
+  const objectRef = ref({ count: 1 });
+  const arrayRef = ref(["a"]);
+  const mapRef = ref(new Map([["a", 1]]));
+  const setRef = ref(new Set(["a"]));
+
+  const Store = new SigmaType<{
+    objectRef: typeof objectRef;
+    arrayRef: typeof arrayRef;
+    mapRef: typeof mapRef;
+    setRef: typeof setRef;
+  }>().defaultState({
+    objectRef,
+    arrayRef,
+    mapRef,
+    setRef,
+  });
+
+  const store = new Store();
+
+  assert.equal(Object.isFrozen(store.objectRef), false);
+  assert.equal(Object.isFrozen(store.arrayRef), false);
+
+  store.objectRef.count += 1;
+  store.arrayRef.push("b");
+  store.mapRef.set("b", 2);
+  store.setRef.add("b");
+
+  assert.equal(store.objectRef.count, 2);
+  assert.deepEqual(store.arrayRef, ["a", "b"]);
+  assert.equal(store.mapRef.get("b"), 2);
+  assert.equal(store.setRef.has("b"), true);
 });
