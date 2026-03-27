@@ -3,6 +3,11 @@ import { assertType, expectTypeOf, test } from "vitest";
 
 import { action, query, ref, SigmaType, type SigmaState } from "preact-sigma";
 
+// @ts-expect-error shouldSetup is internal-only
+import { shouldSetup } from "preact-sigma";
+
+void shouldSetup;
+
 test("sigma infers public state from the two-step declaration", () => {
   type Todo = {
     id: string;

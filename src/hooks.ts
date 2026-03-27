@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "preact/hooks";
-import { InferSetupArgs, shouldSetup, type AnySigmaState } from "./framework.js";
+import { shouldSetup } from "./internal/runtime.js";
+import type { AnySigmaState, InferSetupArgs } from "./internal/types.js";
 import { InferEventType, listen, type InferListener } from "./listener.js";
 
 export function useSigma<T extends AnySigmaState>(create: () => T, setupArgs?: InferSetupArgs<T>) {

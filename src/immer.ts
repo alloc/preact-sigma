@@ -1,6 +1,6 @@
 // Copied from: node_modules/.pnpm/immer@11.1.4/node_modules/immer/dist/immer.d.ts
 // Adapted to skip SigmaRef and SigmaStateLike types.
-import type { AnySigmaState, SigmaRef } from "./framework";
+import type { AnySigmaState, SigmaRef } from "./internal/types.js";
 
 type PrimitiveType = number | string | boolean;
 

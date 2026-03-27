@@ -399,7 +399,6 @@ test("nested sigma states can be stored in state without being mutated through a
     child: SigmaState<{
       state: { count: number };
       actions: { increment(): void };
-      setupArgs: [];
     }>;
     label: string;
   }>()

@@ -1,4 +1,4 @@
-import type { AnySigmaStateWithEvents } from "./framework";
+import type { AnySigmaStateWithEvents } from "./internal/types.js";
 
 type TryGet<T, K extends PropertyKey, TCatch = never> = K extends keyof T ? T[K] : TCatch;
 
