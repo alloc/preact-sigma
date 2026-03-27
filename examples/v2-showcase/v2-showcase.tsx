@@ -1,14 +1,6 @@
 import { useState } from "preact/hooks";
 
-import {
-  listen,
-  query,
-  ref,
-  SigmaType,
-  useListener,
-  useSigma,
-  type SigmaRef,
-} from "preact-sigma";
+import { listen, query, ref, SigmaType, useListener, useSigma, type SigmaRef } from "preact-sigma";
 
 type Command = {
   id: string;
@@ -122,7 +114,9 @@ const CommandPalette = new SigmaType<
   })
   .setup(function () {
     return [
+      // @ts-expect-error - if `history` had a setup method, you would call it here
       this.history.setup(),
+
       listen(window, "keydown", (event) => {
         if ((event.metaKey || event.ctrlKey) && event.key === "k") {
           event.preventDefault();

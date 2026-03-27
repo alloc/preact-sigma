@@ -73,7 +73,7 @@ type EventMethods<TEvents extends AnyEvents | undefined> = [undefined] extends [
       ): Cleanup;
     };
 
-type SetupMethods<TSetupArgs extends any[] | undefined> = [undefined] extends [TSetupArgs]
+type SetupMethods<TSetupArgs extends any[] | undefined> = [TSetupArgs] extends [undefined]
   ? never
   : {
       setup(...args: Extract<TSetupArgs, any[]>): Cleanup;
@@ -528,8 +528,11 @@ export function shouldSetup(
   return getInternalState(publicInstance).type.setupFunctions.length > 0;
 }
 
-export type InferSetupArgs<T extends AnySigmaState> =
-  T extends SigmaState<SigmaDefinition & { setupArgs: infer TArgs extends any[] }> ? TArgs : never;
+export type InferSetupArgs<T extends AnySigmaState> = T extends {
+  setup(...args: infer TArgs extends any[]): Cleanup;
+}
+  ? TArgs
+  : never;
 
 class Sigma extends EventTarget {
   setup(...args: any[]) {
@@ -657,7 +660,7 @@ export class SigmaType<
   TComputeds extends object = {},
   TQueries extends object = {},
   TActions extends object = {},
-  TSetupArgs extends any[] = [],
+  TSetupArgs extends any[] = never,
 > extends Function {
   constructor(name: string = "Sigma") {
     super();
@@ -843,7 +846,7 @@ export class SigmaType<
     >;
   }
 
-  setup<TNextSetupArgs extends TSetupArgs extends [] ? any[] : NonNullable<TSetupArgs>>(
+  setup<TNextSetupArgs extends [TSetupArgs] extends [never] ? any[] : NonNullable<TSetupArgs>>(
     setup: (
       this: SetupContext<{
         state: TState;
@@ -885,7 +888,7 @@ export interface SigmaType<
   TComputeds extends object = {},
   TQueries extends object = {},
   TActions extends object = {},
-  TSetupArgs extends any[] = [],
+  TSetupArgs extends any[] = never,
 > {
   new (...args: InitialStateInput<TState, TDefaults>): SigmaState<
     Extract<
