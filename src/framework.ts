@@ -323,7 +323,6 @@ function snapshotState(instance: SigmaInstance) {
 
 type ContextOptions = {
   allowActions: boolean;
-  allowEmit: boolean;
   allowQueries: boolean;
   draftAware: boolean;
   liveComputeds: boolean;
@@ -332,42 +331,36 @@ type ContextOptions = {
 const ContextOptions = {
   action: {
     allowActions: true,
-    allowEmit: true,
     allowQueries: true,
     draftAware: true,
     liveComputeds: true,
   },
   computedDraftAware: {
     allowActions: false,
-    allowEmit: false,
     allowQueries: false,
     draftAware: true,
     liveComputeds: true,
   },
   computedReadonly: {
     allowActions: false,
-    allowEmit: false,
     allowQueries: false,
     draftAware: false,
     liveComputeds: false,
   },
   query: {
     allowActions: false,
-    allowEmit: false,
     allowQueries: true,
     draftAware: true,
     liveComputeds: true,
   },
   observe: {
     allowActions: false,
-    allowEmit: false,
     allowQueries: true,
     draftAware: false,
     liveComputeds: false,
   },
   setup: {
     allowActions: true,
-    allowEmit: true,
     allowQueries: true,
     draftAware: false,
     liveComputeds: false,
@@ -412,7 +405,7 @@ function createContext(instance: SigmaInstance, options: ContextOptions) {
         return undefined;
       }
       if (key === "emit") {
-        return options.allowEmit
+        return options.allowActions
           ? (name: string, payload?: unknown) =>
               instance.publicInstance.dispatchEvent(new CustomEvent(name, { detail: payload }))
           : undefined;
