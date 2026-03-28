@@ -1,8 +1,8 @@
-import { computed, type ReadonlySignal, Signal, signal } from "@preact/signals";
+import { action, computed, type ReadonlySignal, Signal, signal } from "@preact/signals";
 import { createDraft, finishDraft, freeze, isDraftable, type Patch } from "immer";
 import type { Draft } from "../immer";
 import { getContext } from "./context.js";
-import { reservedKeys, signalPrefix, sigmaRefs } from "./symbols.js";
+import { reservedKeys, sigmaRefs, signalPrefix } from "./symbols.js";
 import type { AnyFunction, AnyResource, AnyState, Cleanup, SigmaObserveChange } from "./types.js";
 
 export type SigmaTypeInternals = {
@@ -140,69 +140,68 @@ export function initializeSigmaInstance(
   registerInternalState(publicInstance, instance);
 }
 
-export function runAction(
-  instance: SigmaInstance,
-  actionFn: AnyFunction,
-  actionContext: object,
-  args: any[],
-) {
-  if (instance.disposed) {
-    throw new Error("[preact-sigma] Cannot run an action on a disposed sigma state");
-  }
-  if (instance.currentDraft) {
-    const result = actionFn.apply(actionContext, args);
-    assertSynchronousActionResult(result);
-    return result;
-  }
+export function buildActionMethod(actionFn: AnyFunction) {
+  return action(function (this: object, ...args: any[]) {
+    const instance = getInternalState(this);
+    if (instance.disposed) {
+      throw new Error("[preact-sigma] Cannot run an action on a disposed sigma state");
+    }
+    const actionContext = getContext(instance, "action");
+    if (instance.currentDraft) {
+      const result = actionFn.apply(actionContext, args);
+      assertSynchronousActionResult(result);
+      return result;
+    }
 
-  const baseState = snapshotState(instance);
-  const draft = createDraft(baseState);
-  instance.currentDraft = draft;
+    const baseState = snapshotState(instance);
+    const draft = createDraft(baseState);
+    instance.currentDraft = draft;
 
-  let ok = false;
-  try {
-    const result = actionFn.apply(actionContext, args);
-    assertSynchronousActionResult(result);
-    ok = true;
-    return result;
-  } finally {
-    const currentDraft = instance.currentDraft!;
-    instance.currentDraft = undefined;
+    let ok = false;
+    try {
+      const result = actionFn.apply(actionContext, args);
+      assertSynchronousActionResult(result);
+      ok = true;
+      return result;
+    } finally {
+      const currentDraft = instance.currentDraft!;
+      instance.currentDraft = undefined;
 
-    if (ok) {
-      let patches: Patch[] | undefined;
-      let inversePatches: Patch[] | undefined;
+      if (ok) {
+        let patches: Patch[] | undefined;
+        let inversePatches: Patch[] | undefined;
 
-      const nextState = instance.type.observeFunctions.some((observer) => observer.patches)
-        ? finishDraft(currentDraft, (nextPatches, nextInversePatches) => {
-            patches = nextPatches;
-            inversePatches = nextInversePatches;
-          })
-        : finishDraft(currentDraft);
+        const nextState = instance.type.observeFunctions.some((observer) => observer.patches)
+          ? finishDraft(currentDraft, (nextPatches, nextInversePatches) => {
+              patches = nextPatches;
+              inversePatches = nextInversePatches;
+            })
+          : finishDraft(currentDraft);
 
-      if (nextState !== baseState) {
-        for (const key of instance.stateKeys) {
-          const value = nextState[key];
-          if (isDraftable(value) && !sigmaRefs.has(value as object)) {
-            freeze(value);
+        if (nextState !== baseState) {
+          for (const key of instance.stateKeys) {
+            const value = nextState[key];
+            if (isDraftable(value) && !sigmaRefs.has(value as object)) {
+              freeze(value);
+            }
+            updateSignal(instance, key, value);
           }
-          updateSignal(instance, key, value);
-        }
 
-        if (instance.type.observeFunctions.length) {
-          const change: SigmaObserveChange<AnyState, true> = {
-            previousState: baseState,
-            state: nextState,
-            inversePatches: inversePatches!,
-            patches: patches!,
-          };
-          for (const observer of instance.type.observeFunctions) {
-            observer.listener.call(getContext(instance, "observe"), change);
+          if (instance.type.observeFunctions.length) {
+            const change: SigmaObserveChange<AnyState, true> = {
+              previousState: baseState,
+              state: nextState,
+              inversePatches: inversePatches!,
+              patches: patches!,
+            };
+            for (const observer of instance.type.observeFunctions) {
+              observer.listener.call(getContext(instance, "observe"), change);
+            }
           }
         }
       }
     }
-  }
+  });
 }
 
 function assertSynchronousActionResult(result: unknown) {

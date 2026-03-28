@@ -3,6 +3,7 @@ import { isDraftable } from "immer";
 import { getContext, setContextPrototype } from "./internal/context.js";
 import {
   assertDefinitionKeyAvailable,
+  buildActionMethod,
   createCleanup,
   getBuilderState,
   getInternalState,
@@ -10,7 +11,6 @@ import {
   initializeSigmaInstance,
   isPlainObject,
   registerBuilderState,
-  runAction,
   type SigmaTypeInternals,
 } from "./internal/runtime.js";
 import { sigmaRefs, sigmaStateBrand, signalPrefix } from "./internal/symbols.js";
@@ -240,10 +240,11 @@ export class SigmaType<
       Object.defineProperty(this.prototype, key, {
         value: function (this: object, ...args: any[]) {
           const instance = getInternalState(this);
+          const queryContext = getContext(instance, "query");
           if (instance.currentDraft) {
-            return nextQuery.apply(getContext(instance, "query"), args);
+            return nextQuery.apply(queryContext, args);
           }
-          return computed(() => nextQuery.apply(getContext(instance, "query"), args)).value;
+          return computed(() => nextQuery.apply(queryContext, args)).value;
         },
       });
     }
@@ -303,10 +304,7 @@ export class SigmaType<
       builderState.actions[key] = nextAction;
 
       Object.defineProperty(this.prototype, key, {
-        value: function (this: object, ...args: any[]) {
-          const instance = getInternalState(this);
-          return runAction(instance, nextAction, getContext(instance, "action"), args);
-        },
+        value: buildActionMethod(nextAction),
       });
     }
     return this as unknown as SigmaType<
