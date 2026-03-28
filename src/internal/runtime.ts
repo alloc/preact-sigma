@@ -530,5 +530,7 @@ export class Sigma extends EventTarget {
 }
 export interface Sigma {
   readonly [sigmaStateBrand]: true;
-  readonly [immer.immerable]: true;
 }
+Object.defineProperty(Sigma.prototype, sigmaStateBrand, {
+  value: true,
+});
