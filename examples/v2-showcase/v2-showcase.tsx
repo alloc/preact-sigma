@@ -37,7 +37,7 @@ const SearchHistory = new SigmaType<{
     },
   });
 
-type SearchHistory = InstanceType<typeof SearchHistory>;
+interface SearchHistory extends InstanceType<typeof SearchHistory> {}
 
 const CommandPalette = new SigmaType<
   {
@@ -136,6 +136,8 @@ const CommandPalette = new SigmaType<
       }),
     ];
   });
+
+interface CommandPalette extends InstanceType<typeof CommandPalette> {}
 
 export function Showcase() {
   const palette = useSigma(() => new CommandPalette(), []);

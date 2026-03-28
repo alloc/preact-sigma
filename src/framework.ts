@@ -1,14 +1,10 @@
 import { computed } from "@preact/signals";
 import { isDraftable } from "immer";
-import { getContext } from "./internal/context.js";
 import {
   assertDefinitionKeyAvailable,
   buildActionMethod,
-  getSigmaInternals,
-  getTypeInternals,
+  buildQueryMethod,
   initializeSigmaInstance,
-  isPlainObject,
-  registerTypeInternals,
   Sigma,
   type SigmaTypeInternals,
 } from "./internal/runtime.js";
@@ -89,12 +85,13 @@ export class SigmaType<
     super();
 
     const type: SigmaTypeInternals = {
-      actions: Object.create(null),
-      computeds: Object.create(null),
+      actionFunctions: Object.create(null),
+      computeFunctions: Object.create(null),
       defaultState: Object.create(null),
       defaultStateKeys: [],
       observeFunctions: [],
-      queries: Object.create(null),
+      patchesEnabled: false,
+      queryFunctions: Object.create(null),
       setupFunctions: [],
     };
 
@@ -109,8 +106,70 @@ export class SigmaType<
       [name: string]: AnySigmaType;
     };
 
-    Object.setPrototypeOf(SigmaTypeBuilder, SigmaType.prototype);
-    registerTypeInternals(SigmaTypeBuilder, type);
+    SigmaTypeBuilder.defaultState = function (defaultState) {
+      for (const key in defaultState) {
+        if (defaultState[key] === undefined) {
+          continue;
+        }
+        type.defaultState[key] = defaultState[key];
+        type.defaultStateKeys.push(key);
+      }
+      return this;
+    };
+
+    SigmaTypeBuilder.computed = function (computeFunctions) {
+      for (const key in computeFunctions) {
+        assertDefinitionKeyAvailable(type, key, "computed");
+        type.computeFunctions[key] = computeFunctions[key] as AnyFunction;
+
+        Object.defineProperty(this.prototype, key, {
+          get: function (this: any) {
+            return this[signalPrefix + key].value;
+          },
+          enumerable: true,
+        });
+      }
+      return this;
+    };
+
+    SigmaTypeBuilder.queries = function (queryFunctions) {
+      for (const key in queryFunctions) {
+        assertDefinitionKeyAvailable(type, key, "query");
+        const queryFunction = queryFunctions[key] as AnyFunction;
+        type.queryFunctions[key] = queryFunction;
+
+        Object.defineProperty(this.prototype, key, {
+          value: buildQueryMethod(queryFunction),
+        });
+      }
+      return this;
+    };
+
+    SigmaTypeBuilder.observe = function (listener, options) {
+      type.observeFunctions.push(listener);
+      if (options?.patches) {
+        type.patchesEnabled = true;
+      }
+      return this;
+    };
+
+    SigmaTypeBuilder.actions = function (actionFunctions) {
+      for (const key in actionFunctions) {
+        assertDefinitionKeyAvailable(type, key, "action");
+        const actionFunction = actionFunctions[key] as AnyFunction;
+        type.actionFunctions[key] = actionFunction;
+
+        Object.defineProperty(this.prototype, key, {
+          value: buildActionMethod(key, actionFunction),
+        });
+      }
+      return this;
+    };
+
+    SigmaTypeBuilder.setup = function (setup) {
+      type.setupFunctions.push(setup);
+      return this;
+    };
 
     return SigmaTypeBuilder as SigmaType<
       TState,
@@ -120,178 +179,6 @@ export class SigmaType<
       TQueries,
       TActions,
       TSetupArgs
-    >;
-  }
-
-  defaultState<TNextDefaults extends AnyDefaultState<TState>>(defaultState: TNextDefaults) {
-    if (!isPlainObject(defaultState)) {
-      throw new Error("[preact-sigma] Sigma definitions require a plain object default state");
-    }
-    const type = getTypeInternals(this);
-    for (const key in defaultState) {
-      if (defaultState[key] === undefined) {
-        continue;
-      }
-      type.defaultState[key] = defaultState[key];
-      type.defaultStateKeys.push(key);
-    }
-    return this as unknown as SigmaType<
-      TState,
-      TEvents,
-      MergeObjects<TDefaults, TNextDefaults>,
-      TComputeds,
-      TQueries,
-      TActions,
-      TSetupArgs
-    >;
-  }
-
-  computed<TNextComputeds extends object>(
-    computeds: TNextComputeds &
-      ThisType<ComputedContext<TState, MergeObjects<TComputeds, TNextComputeds>>>,
-  ) {
-    const type = getTypeInternals(this);
-    const nextKeys = Object.keys(computeds) as Array<Extract<keyof TNextComputeds, string>>;
-    for (const key of nextKeys) {
-      assertDefinitionKeyAvailable(type, key, "computed");
-      type.computeds[key] = computeds[key] as AnyFunction;
-
-      Object.defineProperty(this.prototype, key, {
-        get: function (this: any) {
-          return this[signalPrefix + key].value;
-        },
-        enumerable: true,
-      });
-    }
-    return this as unknown as SigmaType<
-      TState,
-      TEvents,
-      TDefaults,
-      MergeObjects<TComputeds, TNextComputeds>,
-      TQueries,
-      TActions,
-      TSetupArgs
-    >;
-  }
-
-  queries<TNextQueries extends object>(
-    queries: TNextQueries &
-      ThisType<ReadonlyContext<TState, TComputeds, MergeObjects<TQueries, TNextQueries>>>,
-  ) {
-    const type = getTypeInternals(this);
-    const nextKeys = Object.keys(queries) as Array<Extract<keyof TNextQueries, string>>;
-    for (const key of nextKeys) {
-      assertDefinitionKeyAvailable(type, key, "query");
-      const nextQuery = queries[key] as AnyFunction;
-      type.queries[key] = nextQuery;
-
-      Object.defineProperty(this.prototype, key, {
-        value: function (this: AnySigmaState, ...args: any[]) {
-          const instance = getSigmaInternals(this);
-          const queryContext = getContext(instance, "query");
-          if (instance.currentDraft) {
-            return nextQuery.apply(queryContext, args);
-          }
-          return computed(() => nextQuery.apply(queryContext, args)).value;
-        },
-      });
-    }
-    return this as unknown as SigmaType<
-      TState,
-      TEvents,
-      TDefaults,
-      TComputeds,
-      MergeObjects<TQueries, TNextQueries>,
-      TActions,
-      TSetupArgs
-    >;
-  }
-
-  observe(
-    listener: (
-      this: ReadonlyContext<TState, TComputeds, TQueries>,
-      change: SigmaObserveChange<TState>,
-    ) => void,
-    options?: SigmaObserveOptions & { patches?: false | undefined },
-  ): SigmaType<TState, TEvents, TDefaults, TComputeds, TQueries, TActions, TSetupArgs>;
-
-  observe(
-    listener: (
-      this: ReadonlyContext<TState, TComputeds, TQueries>,
-      change: SigmaObserveChange<TState, true>,
-    ) => void,
-    options: SigmaObserveOptions & { patches: true },
-  ): SigmaType<TState, TEvents, TDefaults, TComputeds, TQueries, TActions, TSetupArgs>;
-
-  observe(listener: AnyFunction, options?: SigmaObserveOptions) {
-    const type = getTypeInternals(this);
-    type.observeFunctions.push({
-      patches: Boolean(options?.patches),
-      listener,
-    });
-    return this as unknown as SigmaType<
-      TState,
-      TEvents,
-      TDefaults,
-      TComputeds,
-      TQueries,
-      TActions,
-      TSetupArgs
-    >;
-  }
-
-  actions<TNextActions extends object>(
-    actions: TNextActions &
-      ThisType<
-        ActionContext<TState, TEvents, TComputeds, TQueries, MergeObjects<TActions, TNextActions>>
-      >,
-  ) {
-    const type = getTypeInternals(this);
-    const nextKeys = Object.keys(actions) as Array<Extract<keyof TNextActions, string>>;
-    for (const key of nextKeys) {
-      assertDefinitionKeyAvailable(type, key, "action");
-      const nextAction = actions[key] as AnyFunction;
-      type.actions[key] = nextAction;
-
-      Object.defineProperty(this.prototype, key, {
-        value: buildActionMethod(nextAction),
-      });
-    }
-    return this as unknown as SigmaType<
-      TState,
-      TEvents,
-      TDefaults,
-      TComputeds,
-      TQueries,
-      MergeObjects<TActions, TNextActions>,
-      TSetupArgs
-    >;
-  }
-
-  setup<TNextSetupArgs extends [TSetupArgs] extends [never] ? any[] : NonNullable<TSetupArgs>>(
-    setup: (
-      this: SetupContext<{
-        state: TState;
-        events: TEvents;
-        computeds: TComputeds;
-        queries: TQueries;
-        actions: TActions;
-        setupArgs: TNextSetupArgs;
-      }>,
-      ...args: TNextSetupArgs
-    ) => readonly AnyResource[],
-  ) {
-    const type = getTypeInternals(this);
-    type.setupFunctions.push(setup);
-
-    return this as unknown as SigmaType<
-      TState,
-      TEvents,
-      TDefaults,
-      TComputeds,
-      TQueries,
-      TActions,
-      TNextSetupArgs
     >;
   }
 }
@@ -319,4 +206,112 @@ export interface SigmaType<
       SigmaDefinition
     >
   >;
+
+  /** Does not exist at runtime, only for type inference. */
+  get Instance(): SigmaState<
+    Extract<
+      OmitEmpty<{
+        state: TState;
+        events: TEvents;
+        computeds: TComputeds;
+        queries: TQueries;
+        actions: TActions;
+        setupArgs: TSetupArgs;
+      }>,
+      SigmaDefinition
+    >
+  >;
+
+  defaultState<TNextDefaults extends AnyDefaultState<TState>>(
+    defaultState: TNextDefaults,
+  ): SigmaType<
+    TState,
+    TEvents,
+    MergeObjects<TDefaults, TNextDefaults>,
+    TComputeds,
+    TQueries,
+    TActions,
+    TSetupArgs
+  >;
+
+  computed<TNextComputeds extends object>(
+    computeds: TNextComputeds &
+      ThisType<ComputedContext<TState, MergeObjects<TComputeds, TNextComputeds>>>,
+  ): SigmaType<
+    TState,
+    TEvents,
+    TDefaults,
+    MergeObjects<TComputeds, TNextComputeds>,
+    TQueries,
+    TActions,
+    TSetupArgs
+  >;
+
+  queries<TNextQueries extends object>(
+    queries: TNextQueries &
+      ThisType<ReadonlyContext<TState, TComputeds, MergeObjects<TQueries, TNextQueries>>>,
+  ): SigmaType<
+    TState,
+    TEvents,
+    TDefaults,
+    TComputeds,
+    MergeObjects<TQueries, TNextQueries>,
+    TActions,
+    TSetupArgs
+  >;
+
+  observe(
+    listener: (
+      this: ReadonlyContext<TState, TComputeds, TQueries>,
+      change: SigmaObserveChange<TState>,
+    ) => void,
+    options?: SigmaObserveOptions & { patches?: false | undefined },
+  ): this;
+
+  observe(
+    listener: (
+      this: ReadonlyContext<TState, TComputeds, TQueries>,
+      change: SigmaObserveChange<TState, true>,
+    ) => void,
+    options: SigmaObserveOptions & { patches: true },
+  ): this;
+
+  /**
+   * Adds action methods whose `this` receives draft state, typed events, `commit()`,
+   * and the computeds, queries, and actions already defined on the builder.
+   *
+   * Actions create drafts lazily as they need them. Sync actions on the same
+   * instance reuse the current draft, so they can compose and publish once when
+   * the outer action returns. Declared async actions publish their initial
+   * synchronous work on return, then require `this.commit()` to publish later
+   * writes made after `await`.
+   */
+  actions<TNextActions extends object>(
+    actions: TNextActions &
+      ThisType<
+        ActionContext<TState, TEvents, TComputeds, TQueries, MergeObjects<TActions, TNextActions>>
+      >,
+  ): SigmaType<
+    TState,
+    TEvents,
+    TDefaults,
+    TComputeds,
+    TQueries,
+    MergeObjects<TActions, TNextActions>,
+    TSetupArgs
+  >;
+
+  setup<TNextSetupArgs extends [TSetupArgs] extends [never] ? any[] : NonNullable<TSetupArgs>>(
+    setup: (
+      this: SetupContext<{
+        state: TState;
+        events: TEvents;
+        computeds: TComputeds;
+        queries: TQueries;
+        actions: TActions;
+        setupArgs: TNextSetupArgs;
+      }>,
+      ...args: TNextSetupArgs
+    ) => readonly AnyResource[],
+  ): SigmaType<TState, TEvents, TDefaults, TComputeds, TQueries, TActions, TNextSetupArgs>;
 }

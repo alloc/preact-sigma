@@ -44,6 +44,7 @@ test("sigma states expose readonly state, computeds, queries, and actions", () =
         };
         this.todos.push(todo);
         this.draft = "";
+        this.commit();
         this.emit("added", todo);
       },
       setDraft(draft: string) {
@@ -204,7 +205,33 @@ test("actions reuse one draft and can call queries, computeds, and other actions
   assert.equal(counter.isEven(), true);
 });
 
-test("actions throw when they return a promise and discard draft changes", () => {
+test("commit publishes an explicit boundary inside sync actions", () => {
+  const observed: number[] = [];
+
+  const Counter = new SigmaType<{ count: number }>()
+    .defaultState({
+      count: 0,
+    })
+    .observe((change) => {
+      observed.push(change.newState.count);
+    })
+    .actions({
+      incrementTwice() {
+        this.count += 1;
+        this.commit();
+        this.count += 1;
+      },
+    });
+
+  const counter = new Counter();
+
+  counter.incrementTwice();
+
+  assert.equal(counter.count, 2);
+  assert.deepEqual(observed, [1, 2]);
+});
+
+test("async actions auto-commit sync work and reject when they settle with unpublished changes", async () => {
   const Counter = new SigmaType<{ count: number }>()
     .defaultState({
       count: 0,
@@ -219,10 +246,188 @@ test("actions throw when they return a promise and discard draft changes", () =>
 
   const counter = new Counter();
 
-  assert.throws(() => {
-    counter.incrementLater();
-  }, /Actions must finish synchronously/);
+  const pending = counter.incrementLater();
+
+  assert.equal(counter.count, 1);
+  await pending.then(
+    () => {
+      assert.fail("Expected incrementLater() to reject");
+    },
+    (error) => {
+      assert.match(String(error), /finished with unpublished changes/);
+    },
+  );
+  assert.equal(counter.count, 1);
+});
+
+test("async actions can commit after await", async () => {
+  const observed: number[] = [];
+
+  const Counter = new SigmaType<{ count: number }>()
+    .defaultState({
+      count: 0,
+    })
+    .observe((change) => {
+      observed.push(change.newState.count);
+    })
+    .actions({
+      async incrementLater() {
+        this.count += 1;
+        await Promise.resolve();
+        this.count += 1;
+        this.commit();
+      },
+    });
+
+  const counter = new Counter();
+  const pending = counter.incrementLater();
+
+  assert.equal(counter.count, 1);
+  await pending;
+
+  assert.equal(counter.count, 2);
+  assert.deepEqual(observed, [1, 2]);
+});
+
+test("async actions throw when they cross a boundary with unpublished changes", async () => {
+  const Counter = new SigmaType<{ count: number }, { ignored: void }>()
+    .defaultState({
+      count: 0,
+    })
+    .actions({
+      increment() {
+        this.count += 1;
+      },
+      async incrementLater() {
+        await Promise.resolve();
+        this.count += 1;
+        this.commit();
+      },
+      async emitAfterWrite() {
+        await Promise.resolve();
+        this.count += 1;
+        this.emit("ignored");
+      },
+      async callAsyncActionAfterWrite() {
+        await Promise.resolve();
+        this.count += 1;
+        await this.incrementLater();
+      },
+      async callSyncActionAfterWrite() {
+        await Promise.resolve();
+        this.count += 1;
+        this.increment();
+        this.commit();
+      },
+      emitAfterWriteSync() {
+        this.count += 1;
+        this.emit("ignored");
+      },
+    });
+
+  const counter = new Counter();
+
+  await counter.emitAfterWrite().then(
+    () => {
+      assert.fail("Expected emitAfterWrite() to reject");
+    },
+    (error) => {
+      assert.match(String(error), /before emit/);
+    },
+  );
   assert.equal(counter.count, 0);
+
+  await counter.callAsyncActionAfterWrite().then(
+    () => {
+      assert.fail("Expected callAsyncActionAfterWrite() to reject");
+    },
+    (error) => {
+      assert.match(String(error), /before calling another action/);
+    },
+  );
+  assert.equal(counter.count, 0);
+
+  await counter.callSyncActionAfterWrite();
+  assert.equal(counter.count, 2);
+
+  assert.throws(() => {
+    counter.emitAfterWriteSync();
+  }, /before emit/);
+  assert.equal(counter.count, 2);
+});
+
+test("foreign actions warn and discard unpublished changes", async () => {
+  const warnings: unknown[][] = [];
+  const originalWarn = console.warn;
+  let release!: () => void;
+  const blocked = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+
+  const Counter = new SigmaType<{ count: number }>()
+    .defaultState({
+      count: 0,
+    })
+    .actions({
+      increment() {
+        this.count += 1;
+      },
+      async stageIncrement() {
+        await Promise.resolve();
+        this.count += 1;
+        await blocked;
+      },
+    });
+
+  const counter = new Counter();
+  console.warn = (...args: unknown[]) => {
+    warnings.push(args);
+  };
+
+  try {
+    const pending = counter.stageIncrement();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    counter.increment();
+    release();
+    await pending;
+
+    assert.equal(counter.count, 1);
+    assert.lengthOf(warnings, 1);
+    assert.match(String(warnings[0][0]), /Discarded unpublished action changes/);
+  } finally {
+    console.warn = originalWarn;
+  }
+});
+
+test("same-instance async actions can start from another action when no draft is open", async () => {
+  const Counter = new SigmaType<{ count: number }>()
+    .defaultState({
+      count: 0,
+    })
+    .actions({
+      increment() {
+        this.count += 1;
+      },
+      async incrementLater() {
+        await Promise.resolve();
+        this.increment();
+        this.commit();
+      },
+      async incrementTwice() {
+        const first = this.incrementLater();
+        const second = this.incrementLater();
+        await first;
+        await second;
+      },
+    });
+
+  const counter = new Counter();
+
+  await counter.incrementTwice();
+
+  assert.equal(counter.count, 2);
 });
 
 test("observe runs after committed base-state changes", () => {
@@ -253,8 +458,8 @@ test("observe runs after committed base-state changes", () => {
         count: this.count,
         doubled: this.doubled,
         hasCount: this.hasCount(),
-        previousCount: change.previousState.count,
-        stateCount: change.state.count,
+        previousCount: change.oldState.count,
+        stateCount: change.newState.count,
       });
     })
     .actions({

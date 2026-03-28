@@ -99,15 +99,17 @@ export type ActionContext<
   ComputedValues<TComputeds> &
   QueryMethods<TQueries> &
   ActionMethods<TActions> & {
+    /** Publishes the current action draft immediately so later boundaries use committed state. */
+    commit(): void;
     emit: Emit<TEvents>;
   };
 
 export type AnySigmaType = SigmaType<any, any, any, any, any, any, any>;
 
 /** The public shape shared by all sigma-state instances. */
-export type AnySigmaState = EventTarget & {
+export interface AnySigmaState extends EventTarget {
   readonly [sigmaStateBrand]: true;
-};
+}
 
 /** A sigma-state instance with a typed event map. */
 export type AnySigmaStateWithEvents<TEvents extends AnyEvents> = AnySigmaState & {
@@ -121,8 +123,8 @@ export type SigmaObserveOptions = {
 
 /** The change object delivered to `.observe(...)` listeners. */
 export type SigmaObserveChange<TState extends AnyState, TWithPatches extends boolean = false> = {
-  readonly previousState: Immutable<TState>;
-  readonly state: Immutable<TState>;
+  readonly newState: Immutable<TState>;
+  readonly oldState: Immutable<TState>;
 } & (TWithPatches extends true
   ? {
       readonly inversePatches: readonly Patch[];
@@ -139,16 +141,24 @@ export type SigmaDefinition = {
   setupArgs?: any[];
 };
 
+interface SignalAccessors<T extends object> {
+  get<K extends keyof T>(key: K): ReadonlySignal<T[K]>;
+}
+
 type UnionToIntersection<U> = (U extends any ? (k: U) => void : never) extends (k: infer I) => void
   ? I
   : never;
 
-// Use this overly complex type so that `SigmaState` isn't erased.
+type Simplify<T> = {} & {
+  [K in keyof T]: T[K];
+};
+
+// This lets an interface type extend InstanceType<typeof SigmaType>.
 type MapSigmaDefinition<T extends SigmaDefinition> = keyof T extends infer K
   ? K extends "state"
-    ? Immutable<T[K]>
+    ? Immutable<T[K]> & SignalAccessors<Immutable<T[K]>>
     : K extends "computeds"
-      ? ComputedValues<T[K]>
+      ? ComputedValues<T[K]> & SignalAccessors<ComputedValues<T[K]>>
       : K extends "queries"
         ? QueryMethods<T[K]>
         : K extends "actions"
@@ -162,22 +172,10 @@ type MapSigmaDefinition<T extends SigmaDefinition> = keyof T extends infer K
 
 /** The public instance shape produced by a configured sigma type. */
 export type SigmaState<T extends SigmaDefinition = SigmaDefinition> = AnySigmaState &
-  UnionToIntersection<
-    | MapSigmaDefinition<T>
-    | {
-        get<K extends keyof T["state"]>(key: K): ReadonlySignal<Immutable<T["state"][K]>>;
-        get<K extends keyof T["computeds"]>(
-          key: K,
-        ): ReadonlySignal<ComputedValues<T["computeds"]>[K]>;
-      }
-  >;
+  Simplify<UnionToIntersection<MapSigmaDefinition<T>>>;
 
 export type SetupContext<T extends SigmaDefinition> = SigmaState<T> & {
   emit: T["events"] extends object ? Emit<T["events"]> : never;
-};
-
-type Simplify<T extends object> = {} & {
-  [K in keyof T]: T[K];
 };
 
 export type MergeObjects<TLeft extends object, TRight> = [TRight] extends [object]

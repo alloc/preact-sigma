@@ -1,65 +1,68 @@
-import { action, computed, type ReadonlySignal, Signal, signal } from "@preact/signals";
-import { createDraft, finishDraft, freeze, isDraftable, type Patch } from "immer";
+import { batch, computed, type ReadonlySignal, Signal, signal, untracked } from "@preact/signals";
+import { createDraft, finishDraft, freeze, immerable, isDraftable, type Patch } from "immer";
 import type { Draft } from "../immer";
-import { getContext, setContextPrototype } from "./context.js";
+import { ContextOptions, getContext, getContextOwner, registerContextOwner } from "./context.js";
 import { reservedKeys, sigmaRefs, sigmaStateBrand, signalPrefix } from "./symbols.js";
-import type {
-  AnyFunction,
-  AnyResource,
-  AnySigmaState,
-  AnySigmaType,
-  AnyState,
-  Cleanup,
-  SigmaObserveChange,
-} from "./types.js";
+import type { AnyFunction, AnyResource, AnySigmaState, AnyState, Cleanup } from "./types.js";
 
 export type SigmaTypeInternals = {
-  actions: Record<string, AnyFunction>;
-  computeds: Record<string, AnyFunction>;
+  actionFunctions: Record<string, AnyFunction>;
+  computeFunctions: Record<string, AnyFunction>;
   defaultState: Record<string, unknown>;
   defaultStateKeys: string[];
-  observeFunctions: Array<{
-    listener: AnyFunction;
-    patches: boolean;
-  }>;
-  queries: Record<string, AnyFunction>;
+  observeFunctions: AnyFunction[];
+  patchesEnabled: boolean;
+  queryFunctions: Record<string, AnyFunction>;
   setupFunctions: AnyFunction[];
 };
 
-export type SigmaInternals = {
+export type ActionOwner = {
+  actionContext?: AnySigmaState;
+  actionFn: AnyFunction;
+  actionName: string;
+  args: readonly unknown[];
+  computedContext?: object;
+  currentBase?: AnyState;
   currentDraft?: Draft<AnyState>;
+  id: number;
+  instance: SigmaInternals;
+  publicInstance: AnySigmaState;
+  queryContext?: object;
+};
+
+export type SigmaInternals = {
   currentSetupCleanup?: Cleanup;
-  publicInstance: EventTarget & object;
+  publicInstance: AnySigmaState;
   stateKeys: Set<string>;
   type: SigmaTypeInternals;
   disposed: boolean;
 };
 
 const sigmaInternalsMap = new WeakMap<object, SigmaInternals>();
-const typeInternalsMap = new WeakMap<object, SigmaTypeInternals>();
 
-export function registerSigmaInternals(context: AnySigmaState, instance: SigmaInternals) {
+let nextActionOwnerId = 1;
+// At most one action draft may exist at a time. Same-instance sync nested
+// actions reuse that draft; every other boundary resolves it first.
+let currentDraftOwner: ActionOwner | undefined;
+
+type FinalizedDraftResult = {
+  changed: boolean;
+  inversePatches?: Patch[];
+  newState: AnyState;
+  oldState: AnyState;
+  patches?: Patch[];
+};
+
+export function registerSigmaInternals(context: object, instance: SigmaInternals) {
   sigmaInternalsMap.set(context, instance);
 }
 
-export function getSigmaInternals(context: AnySigmaState): SigmaInternals {
+export function getSigmaInternals(context: object): SigmaInternals {
   const instance = sigmaInternalsMap.get(context);
   if (!instance) {
     throw new Error("[preact-sigma] Invalid sigma context");
   }
   return instance;
-}
-
-export function registerTypeInternals(builder: AnySigmaType, type: SigmaTypeInternals) {
-  typeInternalsMap.set(builder, type);
-}
-
-export function getTypeInternals(type: AnySigmaType): SigmaTypeInternals {
-  const internalType = typeInternalsMap.get(type);
-  if (!internalType) {
-    throw new Error("[preact-sigma] Invalid sigma type builder");
-  }
-  return internalType;
 }
 
 export function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -111,7 +114,6 @@ export function initializeSigmaInstance(
   }
 
   const instance: SigmaInternals = {
-    currentDraft: undefined,
     currentSetupCleanup: undefined,
     publicInstance,
     stateKeys,
@@ -139,90 +141,131 @@ export function initializeSigmaInstance(
       enumerable: true,
     });
   }
-  for (const key in type.computeds) {
+  for (const key in type.computeFunctions) {
     Object.defineProperty(publicInstance, signalPrefix + key, {
-      value: computed(() => type.computeds[key].call(getContext(instance, "computedReadonly"))),
+      value: computed(() =>
+        type.computeFunctions[key].call(getContext(instance, "computedReadonly")),
+      ),
     });
   }
 
   registerSigmaInternals(publicInstance, instance);
 }
 
-export function buildActionMethod(actionFn: AnyFunction) {
-  return action(function (this: AnySigmaState, ...args: any[]) {
+export function buildQueryMethod(queryFunction: AnyFunction) {
+  return function (this: AnySigmaState, ...args: any[]) {
+    const instance = getSigmaInternals(this);
+    const owner = getContextOwner(this);
+    if (owner) {
+      return queryFunction.apply(getContext(owner, "queryDraftAware"), args);
+    }
+    return computed(() => queryFunction.apply(getContext(instance, "queryCommitted"), args)).value;
+  };
+}
+
+export function buildActionMethod(actionName: string, actionFn: AnyFunction) {
+  return function (this: AnySigmaState, ...args: any[]) {
     const instance = getSigmaInternals(this);
     if (instance.disposed) {
       throw new Error("[preact-sigma] Cannot run an action on a disposed sigma state");
     }
-    const actionContext = getContext(instance, "action");
-    if (instance.currentDraft) {
-      const result = actionFn.apply(actionContext, args);
-      assertSynchronousActionResult(result);
-      return result;
-    }
 
-    const baseState = snapshotState(instance);
-    const draft = createDraft(baseState);
-    instance.currentDraft = draft;
+    return untracked(() => {
+      let owner: ActionOwner;
 
-    let ok = false;
-    try {
-      const result = actionFn.apply(actionContext, args);
-      assertSynchronousActionResult(result);
-      ok = true;
-      return result;
-    } finally {
-      const currentDraft = instance.currentDraft!;
-      instance.currentDraft = undefined;
-
-      if (ok) {
-        let patches: Patch[] | undefined;
-        let inversePatches: Patch[] | undefined;
-
-        const nextState = instance.type.observeFunctions.some((observer) => observer.patches)
-          ? finishDraft(currentDraft, (nextPatches, nextInversePatches) => {
-              patches = nextPatches;
-              inversePatches = nextInversePatches;
-            })
-          : finishDraft(currentDraft);
-
-        if (nextState !== baseState) {
-          for (const key of instance.stateKeys) {
-            const value = nextState[key];
-            if (isDraftable(value) && !sigmaRefs.has(value as object)) {
-              freeze(value);
-            }
-            updateSignal(instance, key, value);
-          }
-
-          if (instance.type.observeFunctions.length) {
-            const change: SigmaObserveChange<AnyState, true> = {
-              previousState: baseState,
-              state: nextState,
-              inversePatches: inversePatches!,
-              patches: patches!,
-            };
-            for (const observer of instance.type.observeFunctions) {
-              observer.listener.call(getContext(instance, "observe"), change);
-            }
-          }
-        }
+      const callerOwner = getContextOwner(this);
+      if (callerOwner && callerOwner.instance === instance) {
+        owner = callerOwner;
+      } else {
+        handleActionBoundary(callerOwner, "action", actionName);
+        owner = createActionOwner(instance, actionName, actionFn, args);
       }
-    }
-  });
+
+      let result: unknown;
+      try {
+        result = actionFn.apply(owner.actionContext, [...args]);
+      } catch (error) {
+        clearCurrentDraft(owner);
+        throw error;
+      }
+
+      const finalized = finalizeOwnerDraft(owner);
+      if (finalized?.changed) {
+        publishState(instance, finalized);
+      }
+      if (isPromiseLike(result)) {
+        return resolveAsyncActionResult(owner, result);
+      }
+      return result;
+    });
+  };
 }
 
-function assertSynchronousActionResult(result: unknown) {
-  if (
-    result &&
-    (typeof result === "object" || typeof result === "function") &&
-    typeof (result as PromiseLike<unknown>).then === "function"
-  ) {
-    void Promise.resolve(result).catch(() => {});
-    throw new Error(
-      "[preact-sigma] Actions must finish synchronously. Do async work outside the action and call actions before and after await.",
-    );
+export function readActionStateValue(owner: ActionOwner, key: string, options: ContextOptions) {
+  if (owner.currentDraft) {
+    return owner.currentDraft[key];
   }
+
+  const signal = getSignal(owner.instance, key);
+  const committedValue = options.reactiveReads ? signal.value : signal.peek();
+
+  if (
+    options.draftOnRead &&
+    isDraftable(committedValue) &&
+    !sigmaRefs.has(committedValue as object)
+  ) {
+    return ensureOwnerDraft(owner)[key];
+  }
+
+  return committedValue;
+}
+
+export function readActionComputedValue(owner: ActionOwner, key: string) {
+  return owner.instance.type.computeFunctions[key].call(getContext(owner, "computedDraftAware"));
+}
+
+export function setActionStateValue(owner: ActionOwner, key: string, value: unknown) {
+  ensureOwnerDraft(owner)[key] = value;
+}
+
+export function commitActionOwner(owner: ActionOwner) {
+  const finalized = finalizeOwnerDraft(owner);
+  if (finalized?.changed) {
+    publishState(owner.instance, finalized);
+  }
+}
+
+export function handleActionBoundary(
+  owner: ActionOwner | undefined,
+  boundary: "action" | "emit",
+  actionName?: string,
+) {
+  const draftOwner = currentDraftOwner;
+  if (!draftOwner?.currentDraft) {
+    return;
+  }
+
+  const finalized = finalizeOwnerDraft(draftOwner);
+  if (!finalized?.changed) {
+    return;
+  }
+
+  if (draftOwner === owner) {
+    const message =
+      boundary === "emit"
+        ? `[preact-sigma] Action "${draftOwner.actionName}" has unpublished changes. Call this.commit() before emit().`
+        : `[preact-sigma] Action "${draftOwner.actionName}" has unpublished changes. Call this.commit() before calling another action.`;
+    throw new Error(message);
+  }
+
+  if (boundary === "emit") {
+    throw new Error("[preact-sigma] Unexpected emit boundary. This is a bug.");
+  }
+
+  console.warn(
+    `[preact-sigma] Discarded unpublished action changes from "${draftOwner.actionName}" before running "${actionName ?? "another action"}".`,
+    createDraftMetadata(draftOwner),
+  );
 }
 
 export function assertDefinitionKeyAvailable(
@@ -233,7 +276,11 @@ export function assertDefinitionKeyAvailable(
   if (reservedKeys.has(key)) {
     throw new Error(`[preact-sigma] Reserved property name: ${key}`);
   }
-  if (key in builder.computeds || key in builder.queries || key in builder.actions) {
+  if (
+    key in builder.computeFunctions ||
+    key in builder.queryFunctions ||
+    key in builder.actionFunctions
+  ) {
     throw new Error(`[preact-sigma] Duplicate key for ${kind}: ${key}`);
   }
 }
@@ -243,6 +290,51 @@ export function shouldSetup(publicInstance: AnySigmaState): publicInstance is An
 } {
   const instance = getSigmaInternals(publicInstance);
   return instance.type.setupFunctions.length > 0;
+}
+
+function clearCurrentDraft(owner: ActionOwner) {
+  owner.currentDraft = undefined;
+  owner.currentBase = undefined;
+  if (currentDraftOwner === owner) {
+    currentDraftOwner = undefined;
+  }
+}
+
+function createActionOwner(
+  instance: SigmaInternals,
+  actionName: string,
+  actionFn: AnyFunction,
+  args: readonly unknown[],
+): ActionOwner {
+  const owner: ActionOwner = {
+    actionFn,
+    actionName,
+    args,
+    id: nextActionOwnerId++,
+    instance,
+    publicInstance: instance.publicInstance,
+  };
+  owner.actionContext = getContext(owner, "action") as AnySigmaState;
+  registerSigmaInternals(owner.actionContext, instance);
+  registerContextOwner(owner.actionContext, owner);
+  return owner;
+}
+
+function createCommitError(owner: ActionOwner) {
+  return new Error(
+    `[preact-sigma] Async action "${owner.actionName}" finished with unpublished changes. Call this.commit() before await or return.`,
+  );
+}
+
+function createDraftMetadata(owner: ActionOwner) {
+  return {
+    action: owner.actionFn,
+    actionArgs: owner.args,
+    actionId: owner.id,
+    actionName: owner.actionName,
+    draftedInstance: currentDraftOwner?.publicInstance ?? owner.publicInstance,
+    instance: owner.instance.publicInstance,
+  };
 }
 
 function disposeCleanupResource(resource: AnyResource) {
@@ -255,9 +347,106 @@ function disposeCleanupResource(resource: AnyResource) {
   }
 }
 
-function updateSignal(instance: SigmaInternals, key: string, value: unknown) {
-  const nextSignal = getSignal(instance, key) as Signal<any>;
-  nextSignal.value = value;
+function ensureOwnerDraft(owner: ActionOwner) {
+  if (owner.currentDraft) {
+    return owner.currentDraft;
+  }
+
+  // Another invocation may already own the one global draft slot. Resolve it
+  // before this owner starts a new draft so drafts never overlap.
+  handleActionBoundary(owner, "action", owner.actionName);
+
+  // Every action phase is draft-lazy. A draft opens only on the first write or
+  // on a read that needs draft-backed mutation semantics.
+  owner.currentBase = snapshotState(owner.instance);
+  owner.currentDraft = createDraft(owner.currentBase);
+  currentDraftOwner = owner;
+
+  return owner.currentDraft;
+}
+
+function finalizeOwnerDraft(owner: ActionOwner): FinalizedDraftResult | undefined {
+  const currentDraft = owner.currentDraft;
+  const oldState = owner.currentBase;
+  if (!currentDraft || !oldState) {
+    return undefined;
+  }
+
+  clearCurrentDraft(owner);
+
+  let patches: Patch[] | undefined;
+  let inversePatches: Patch[] | undefined;
+
+  const newState = owner.instance.type.patchesEnabled
+    ? finishDraft(currentDraft, (nextPatches, nextInversePatches) => {
+        patches = nextPatches;
+        inversePatches = nextInversePatches;
+      })
+    : finishDraft(currentDraft);
+
+  return {
+    changed: newState !== oldState,
+    inversePatches,
+    newState,
+    oldState,
+    patches,
+  };
+}
+
+function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
+  return value != null && typeof (value as PromiseLike<unknown>).then === "function";
+}
+
+function publishState(instance: SigmaInternals, finalized: FinalizedDraftResult) {
+  batch(() => {
+    for (const key of instance.stateKeys) {
+      const nextValue = finalized.newState[key];
+      if (isDraftable(nextValue) && !sigmaRefs.has(nextValue as object)) {
+        freeze(nextValue);
+      }
+      const signal = getSignal(instance, key) as Signal<any>;
+      signal.value = nextValue;
+    }
+  });
+
+  for (const observer of instance.type.observeFunctions) {
+    observer.call(getContext(instance, "observe"), finalized);
+  }
+}
+
+async function resolveAsyncActionResult(owner: ActionOwner, result: PromiseLike<unknown>) {
+  let settledValue: unknown;
+  let settledError: unknown;
+  let rejected = false;
+
+  try {
+    settledValue = await result;
+  } catch (error) {
+    rejected = true;
+    settledError = error;
+  }
+
+  if (currentDraftOwner === owner && owner.currentDraft) {
+    const finalized = finalizeOwnerDraft(owner);
+    if (finalized?.changed) {
+      // Settling with unpublished changes is the async-action footgun we want to
+      // surface directly. The draft is discarded and the promise rejects here.
+      const commitError = createCommitError(owner);
+      if (rejected) {
+        throw new AggregateError(
+          [settledError, commitError],
+          `[preact-sigma] Async action "${owner.actionName}" rejected and left unpublished changes`,
+        );
+      }
+      throw commitError;
+    }
+  }
+
+  if (rejected) {
+    throw settledError;
+  }
+
+  return settledValue;
 }
 
 function snapshotState(instance: SigmaInternals) {
@@ -316,8 +505,5 @@ export class Sigma extends EventTarget {
 }
 export interface Sigma {
   readonly [sigmaStateBrand]: true;
+  readonly [immerable]: true;
 }
-Object.defineProperty(Sigma.prototype, sigmaStateBrand, {
-  value: true,
-});
-setContextPrototype(Sigma.prototype);

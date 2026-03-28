@@ -1,86 +1,243 @@
-import { getSignal, registerSigmaInternals, Sigma, type SigmaInternals } from "./runtime.js";
-import { AnySigmaState } from "./types.js";
+import {
+  commitActionOwner,
+  getSignal,
+  handleActionBoundary,
+  readActionComputedValue,
+  readActionStateValue,
+  registerSigmaInternals,
+  setActionStateValue,
+  type ActionOwner,
+  type SigmaInternals,
+} from "./runtime.js";
+import type { AnySigmaState } from "./types.js";
 
-type ContextKind =
-  | "action"
-  | "computedDraftAware"
-  | "computedReadonly"
-  | "observe"
-  | "query"
-  | "setup";
+type PublicContextKind = "computedReadonly" | "observe" | "queryCommitted" | "setup";
+type OwnerContextKind = "action" | "computedDraftAware" | "queryDraftAware";
+type ContextKind = OwnerContextKind | PublicContextKind;
 
-type ContextOptions = {
+export type ContextOptions = {
+  /** Exposes public action methods on `this`. */
   allowActions: boolean;
+  /** Exposes `this.commit()` on action contexts. */
+  allowCommit: boolean;
+  /** Exposes `this.emit(...)` on the context. */
+  allowEmit: boolean;
+  /** Exposes public query methods on `this`. */
   allowQueries: boolean;
+  /** Allows direct top-level state assignment through the proxy. */
+  allowWrites: boolean;
+  /** Reads state and computeds through the owner draft instead of committed signals. */
   draftAware: boolean;
+  /** Creates a draft from a read when the read must support later mutation semantics. */
+  draftOnRead: boolean;
+  /** Evaluates computeds live against the current draft-aware context. */
   liveComputeds: boolean;
+  /** Reads signals through `.value` so the caller participates in tracking. */
+  reactiveReads: boolean;
 };
 
-const contextOptions = {
-  action: {
-    allowActions: true,
+const disabledContextOptions = {
+  allowActions: false,
+  allowCommit: false,
+  allowEmit: false,
+  allowQueries: false,
+  allowWrites: false,
+  draftAware: false,
+  draftOnRead: false,
+  liveComputeds: false,
+  reactiveReads: false,
+} satisfies ContextOptions;
+
+const publicContextOptions = {
+  computedReadonly: {
+    ...disabledContextOptions,
+    reactiveReads: true,
+  },
+  observe: {
+    ...disabledContextOptions,
     allowQueries: true,
+  },
+  queryCommitted: {
+    ...disabledContextOptions,
+    allowQueries: true,
+    reactiveReads: true,
+  },
+  setup: {
+    ...disabledContextOptions,
+    allowActions: true,
+    allowEmit: true,
+    allowQueries: true,
+  },
+} satisfies Record<PublicContextKind, ContextOptions>;
+
+const ownerContextOptions = {
+  action: {
+    ...disabledContextOptions,
+    allowActions: true,
+    allowCommit: true,
+    allowEmit: true,
+    allowQueries: true,
+    allowWrites: true,
     draftAware: true,
+    draftOnRead: true,
     liveComputeds: true,
   },
   computedDraftAware: {
-    allowActions: false,
-    allowQueries: false,
+    ...disabledContextOptions,
     draftAware: true,
     liveComputeds: true,
   },
-  computedReadonly: {
-    allowActions: false,
-    allowQueries: false,
-    draftAware: false,
-    liveComputeds: false,
-  },
-  query: {
-    allowActions: false,
+  queryDraftAware: {
+    ...disabledContextOptions,
     allowQueries: true,
     draftAware: true,
     liveComputeds: true,
   },
-  observe: {
-    allowActions: false,
-    allowQueries: true,
-    draftAware: false,
-    liveComputeds: false,
-  },
-  setup: {
-    allowActions: true,
-    allowQueries: true,
-    draftAware: false,
-    liveComputeds: false,
-  },
-} satisfies Record<ContextKind, ContextOptions>;
+} satisfies Record<OwnerContextKind, ContextOptions>;
 
-const dirtyContexts: Record<ContextKind, Set<object>> = {
-  action: new Set(),
-  computedDraftAware: new Set(),
+const dirtyContexts: Record<PublicContextKind, Set<object>> = {
   computedReadonly: new Set(),
   observe: new Set(),
-  query: new Set(),
+  queryCommitted: new Set(),
   setup: new Set(),
 };
-const contextKinds = Object.keys(dirtyContexts) as ContextKind[];
-const contextCache: Record<ContextKind, WeakMap<object, object>> = {
-  action: new WeakMap(),
-  computedDraftAware: new WeakMap(),
+const contextKinds = Object.keys(dirtyContexts) as PublicContextKind[];
+const contextCache: Record<PublicContextKind, WeakMap<object, object>> = {
   computedReadonly: new WeakMap(),
   observe: new WeakMap(),
-  query: new WeakMap(),
+  queryCommitted: new WeakMap(),
   setup: new WeakMap(),
 };
+// Action/query/computed draft-aware contexts are invocation-scoped, so only the
+// reusable public contexts live in the global cache.
+const contextOwnerMap = new WeakMap<object, ActionOwner>();
 let contextCacheFlushScheduled = false;
 
-export function getContext(instance: SigmaInternals, kind: ContextKind) {
+export function getContext(target: SigmaInternals, kind: PublicContextKind): object;
+export function getContext(target: ActionOwner, kind: OwnerContextKind): object;
+export function getContext(target: SigmaInternals | ActionOwner, kind: ContextKind) {
+  if (isOwnerContextKind(kind)) {
+    return getOwnerContext(target as ActionOwner, kind);
+  }
+  return getPublicContext(target as SigmaInternals, kind);
+}
+
+export function getContextOwner(context: object) {
+  return contextOwnerMap.get(context);
+}
+
+export function registerContextOwner(context: object, owner: ActionOwner) {
+  contextOwnerMap.set(context, owner);
+}
+
+function createContext(
+  instance: SigmaInternals,
+  options: ContextOptions,
+  owner: ActionOwner | undefined,
+) {
+  const publicPrototype = Object.getPrototypeOf(instance.publicInstance) as AnySigmaState;
+  return new Proxy(publicPrototype, {
+    get(_target, key) {
+      if (typeof key !== "string") {
+        return Reflect.get(publicPrototype, key, owner?.actionContext ?? instance.publicInstance);
+      }
+      if (key === "commit") {
+        return options.allowCommit && owner ? () => commitActionOwner(owner) : undefined;
+      }
+      if (key === "emit") {
+        return options.allowEmit && owner
+          ? (name: string, detail?: unknown) => {
+              // `emit()` is always a boundary: same-owner unpublished changes throw,
+              // and foreign drafts are resolved here before dispatching.
+              handleActionBoundary(owner, "emit");
+
+              instance.publicInstance.dispatchEvent(new CustomEvent(name, { detail }));
+            }
+          : undefined;
+      }
+      if (instance.stateKeys.has(key)) {
+        if (owner && options.draftAware) {
+          return readActionStateValue(owner, key, options);
+        }
+        const signal = getSignal(instance, key);
+        return options.reactiveReads ? signal.value : signal.peek();
+      }
+      if (key in instance.type.computeFunctions) {
+        if (owner && options.liveComputeds) {
+          return readActionComputedValue(owner, key);
+        }
+        const signal = getSignal(instance, key);
+        return options.reactiveReads ? signal.value : signal.peek();
+      }
+      if (options.allowQueries && key in instance.type.queryFunctions) {
+        return Reflect.get(instance.publicInstance, key);
+      }
+      if (options.allowActions && key in instance.type.actionFunctions) {
+        return Reflect.get(instance.publicInstance, key);
+      }
+      if (Reflect.has(publicPrototype, key)) {
+        return Reflect.get(publicPrototype, key, owner?.actionContext ?? instance.publicInstance);
+      }
+      return undefined;
+    },
+    set(_target, key, value) {
+      if (
+        !owner ||
+        !options.allowWrites ||
+        typeof key !== "string" ||
+        !instance.stateKeys.has(key)
+      ) {
+        return false;
+      }
+      setActionStateValue(owner, key, value);
+      return true;
+    },
+    apply: unsupportedOperation,
+    construct: unsupportedOperation,
+    defineProperty: unsupportedOperation,
+    deleteProperty: unsupportedOperation,
+    getOwnPropertyDescriptor: unsupportedOperation,
+    has: unsupportedOperation,
+    isExtensible: unsupportedOperation,
+    ownKeys: unsupportedOperation,
+    preventExtensions: unsupportedOperation,
+    setPrototypeOf: unsupportedOperation,
+  });
+}
+
+function unsupportedOperation(): never {
+  throw new Error("[preact-sigma] This operation is not supported by context proxies");
+}
+
+const kindToOwnerContextKey = {
+  action: "actionContext",
+  computedDraftAware: "computedContext",
+  queryDraftAware: "queryContext",
+} satisfies Record<OwnerContextKind, keyof ActionOwner>;
+
+function isOwnerContextKind(kind: ContextKind): kind is OwnerContextKind {
+  return kind in kindToOwnerContextKey;
+}
+
+function getOwnerContext(owner: ActionOwner, kind: OwnerContextKind) {
+  const contextKey = kindToOwnerContextKey[kind];
+  if (owner[contextKey]) {
+    return owner[contextKey];
+  }
+  const context = createContext(owner.instance, ownerContextOptions[kind], owner);
+  registerSigmaInternals(context, owner.instance);
+  registerContextOwner(context, owner);
+  owner[contextKey] = context;
+  return context;
+}
+
+function getPublicContext(instance: SigmaInternals, kind: PublicContextKind) {
   const cachedContext = contextCache[kind].get(instance);
   if (cachedContext) {
     return cachedContext;
   }
 
-  const context = createContext(instance, contextOptions[kind]);
+  const context = createContext(instance, publicContextOptions[kind], undefined);
   registerSigmaInternals(context, instance);
 
   contextCache[kind].set(instance, context);
@@ -89,6 +246,9 @@ export function getContext(instance: SigmaInternals, kind: ContextKind) {
   if (!contextCacheFlushScheduled) {
     contextCacheFlushScheduled = true;
     setTimeout(() => {
+      // Public contexts are safe to reuse only within the current turn. Flushing on
+      // the next macrotask keeps the cache cheap without letting it retain stale
+      // builder state forever.
       for (const queuedKind of contextKinds) {
         for (const queuedInstance of dirtyContexts[queuedKind]) {
           contextCache[queuedKind].delete(queuedInstance);
@@ -100,55 +260,4 @@ export function getContext(instance: SigmaInternals, kind: ContextKind) {
   }
 
   return context;
-}
-
-function createContext(instance: SigmaInternals, options: ContextOptions) {
-  return new Proxy(Sigma.prototype as AnySigmaState, {
-    get(_target, key) {
-      if (Reflect.has(Sigma.prototype, key)) {
-        return Reflect.get(Sigma.prototype, key);
-      }
-      if (typeof key !== "string") {
-        return undefined;
-      }
-      if (key === "emit") {
-        return options.allowActions
-          ? (name: string, payload?: unknown) =>
-              instance.publicInstance.dispatchEvent(new CustomEvent(name, { detail: payload }))
-          : undefined;
-      }
-      if (instance.stateKeys.has(key)) {
-        return options.draftAware && instance.currentDraft
-          ? instance.currentDraft[key]
-          : getSignal(instance, key).value;
-      }
-      if (key in instance.type.computeds) {
-        return options.liveComputeds
-          ? instance.type.computeds[key].call(getContext(instance, "computedDraftAware"))
-          : getSignal(instance, key).value;
-      }
-      if (options.allowQueries && key in instance.type.queries) {
-        return Reflect.get(instance.publicInstance, key);
-      }
-      if (options.allowActions && key in instance.type.actions) {
-        return Reflect.get(instance.publicInstance, key);
-      }
-      return undefined;
-    },
-    set(_target, key, value) {
-      if (!options.draftAware || typeof key !== "string" || !instance.currentDraft) {
-        return false;
-      }
-      if (!instance.stateKeys.has(key)) {
-        return false;
-      }
-      instance.currentDraft[key] = value;
-      return true;
-    },
-    has(_target, _key) {
-      throw new Error(
-        "[preact-sigma] Property existence checks are not supported by context proxies",
-      );
-    },
-  });
 }

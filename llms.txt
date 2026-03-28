@@ -205,16 +205,20 @@ Actions are added with `.actions({ ... })`.
 
 Behavior:
 
-- top-level state reads and writes go through one Immer draft for the whole action call
+- actions create drafts lazily when reads or writes need draft-backed mutation semantics
+- declared async actions publish their initial synchronous draft on return
+- after an async action resumes from `await`, top-level reads of draftable state and state writes may open a hidden draft for that async invocation
 - actions may call other actions, queries, and computeds
-- nested action calls reuse the current draft
-- successful actions freeze the resulting public state and write it back to per-property signals
+- same-instance sync nested action calls reuse the current draft
+- `this.commit()` publishes the current draft immediately
+- successful publishes freeze the resulting public state and write it back to per-property signals
 - actions can emit typed events with `this.emit(...)`
-- actions finish synchronously; returning a promise is unsupported and throws at runtime
+- `emit()` and action calls that would start a different invocation are boundaries
+- if an async action reaches `await` or `return` with unpublished changes, the action promise rejects when it settles
+- if an action crosses a boundary while it owns unpublished changes, sigma throws until `this.commit()` publishes them
+- if a different invocation crosses a boundary while unpublished changes still exist, sigma warns and discards them before continuing
 - action wrappers are shared across instances
 - action typing only exposes computeds, queries, and actions that were already present when its `.actions(...)` call happened
-
-For async workflows, do the async work outside the action and call synchronous actions before and after `await`. `setup(...)`, event listeners, and component code can own that orchestration.
 
 Nested sigma states stored in state stay usable as values. Actions do not proxy direct mutation into a nested sigma state's internals.
 
@@ -226,11 +230,11 @@ Behavior:
 
 - each observer runs after a successful action commit that changes base state
 - observers do not run for actions that leave base state unchanged
-- `change.state` is the committed base-state snapshot for that action
-- `change.previousState` is the base-state snapshot from before that action started
+- `change.newState` is the committed base-state snapshot for that action
+- `change.oldState` is the base-state snapshot from before that action started
 - `this` inside an observer exposes readonly state, computeds, and queries
 - observers do not receive action methods or `emit(...)` on `this`
-- nested action calls produce one observer notification after the outer action commits
+- same-instance sync nested action calls produce one observer notification after the outer action commits
 - patch generation is opt-in with `{ patches: true }`
 - when patch generation is enabled, `change.patches` and `change.inversePatches` come from Immer
 - applications are responsible for calling `enablePatches()` before using observer patch generation

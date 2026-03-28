@@ -69,8 +69,8 @@ test("sigma infers public state from the two-step declaration", () => {
       assertType<string>(this.draft);
       assertType<number>(this.completedCount);
       assertType<boolean>(this.canAdd());
-      assertType<string>(change.previousState.draft);
-      assertType<readonly Todo[]>(change.state.todos);
+      assertType<string>(change.oldState.draft);
+      assertType<readonly Todo[]>(change.newState.todos);
       // @ts-expect-error patches are only available when requested
       void change.patches;
     })
@@ -186,6 +186,7 @@ test("inline builder methods infer this for state reads", () => {
     .actions({
       increment() {
         assertType<number>(this.count);
+        assertType<void>(this.commit());
         this.count += 1;
       },
     });
