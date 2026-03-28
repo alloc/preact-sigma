@@ -7,7 +7,7 @@
 - `state property`: A top-level property from `TState`, such as `draft` in `{ draft: string }`.
 - `computed`: A tracked getter declared with `.computed({ ... })`.
 - `query`: A tracked method declared with `.queries({ ... })` or created with `query(fn)`.
-- `action`: A method declared with `.actions({ ... })` that reads and writes through one Immer draft for the whole call.
+- `action`: A method declared with `.actions({ ... })` that reads and writes through one Immer draft for one synchronous call.
 - `setup handler`: A function declared with `.setup(fn)` that returns an array of cleanup resources.
 - `cleanup resource`: A cleanup function, an `AbortController`, or an object with `[Symbol.dispose]()`.
 - `signal access`: Reading the underlying `ReadonlySignal` for a state property or computed through `instance.get(key)`.
@@ -20,18 +20,21 @@ It gives each top-level state property its own signal, exposes readonly public s
 
 ## Runtime Exports
 
-Import APIs from `preact-sigma`.
+Import runtime APIs from `preact-sigma`.
 
 ```typescript
 import {
   SigmaType,
   action,
+  batch,
   computed,
   effect,
+  freeze,
   isSigmaState,
   listen,
   query,
   ref,
+  untracked,
   useListener,
   useSigma,
 } from "preact-sigma";
@@ -39,19 +42,19 @@ import {
 
 ## Type Exports
 
-- `AnyDefaultState`
-- `AnyEvents`
-- `AnyResource`
-- `AnySigmaState`
-- `AnySigmaStateWithEvents`
-- `AnyState`
-- `InferEventType`
-- `InferSetupArgs`
-- `InferListener`
-- `SigmaObserveChange`
-- `SigmaObserveOptions`
-- `SigmaRef`
-- `SigmaState`
+- `AnyDefaultState`: Describes the object accepted by `.defaultState(...)`.
+- `AnyEvents`: Describes an event map from event names to payload objects or `void`.
+- `AnyResource`: Describes a supported setup cleanup resource.
+- `AnySigmaState`: Describes the public shape shared by all sigma-state instances.
+- `AnySigmaStateWithEvents`: Describes a sigma-state instance with a typed event map.
+- `AnyState`: Describes the top-level state object for a sigma type.
+- `InferEventType`: Infers the supported event names for a target used with `listen(...)` or `useListener(...)`.
+- `InferSetupArgs`: Infers the `setup(...)` argument list for a sigma-state instance.
+- `InferListener`: Infers the listener signature for a target and event name.
+- `SigmaObserveChange`: Describes the object received by `.observe(...)` listeners.
+- `SigmaObserveOptions`: Describes the options object accepted by `.observe(...)`.
+- `SigmaRef`: Describes a value marked with `ref(...)`.
+- `SigmaState`: Describes the public instance shape produced by a configured sigma type.
 
 ## Declaration Pattern
 
@@ -157,7 +160,7 @@ Behavior:
 - public state reads are reactive
 - computed getters are reactive and lazily memoized
 - queries are reactive at the call site, including queries with arguments
-- `get(key)` returns the underlying `ReadonlySignal` for a state property or computed
+- query calls are not memoized across invocations; each call uses a fresh `computed(...)` wrapper and does not retain that signal
 
 ## `get(key)`
 
@@ -190,6 +193,9 @@ Behavior:
 - `this` inside a query exposes readonly state, computeds, and other queries
 - queries do not receive action methods on `this`
 - when a query runs inside an action, it reads from the current draft-aware state
+- query results are reactive at the call site but are not memoized across calls
+- prefer `.queries({ ... })` for commonly needed instance methods
+- not every calculation belongs in `.queries({ ... })`; keeping a calculation local to the module that uses it is often clearer until it becomes a common use case
 - query wrappers are shared across instances
 - query typing only exposes computeds and queries that were already present when its `.queries(...)` call happened
 
@@ -204,8 +210,11 @@ Behavior:
 - nested action calls reuse the current draft
 - successful actions freeze the resulting public state and write it back to per-property signals
 - actions can emit typed events with `this.emit(...)`
+- actions finish synchronously; returning a promise is unsupported and throws at runtime
 - action wrappers are shared across instances
 - action typing only exposes computeds, queries, and actions that were already present when its `.actions(...)` call happened
+
+For async workflows, do the async work outside the action and call synchronous actions before and after `await`. `setup(...)`, event listeners, and component code can own that orchestration.
 
 Nested sigma states stored in state stay usable as values. Actions do not proxy direct mutation into a nested sigma state's internals.
 
@@ -285,7 +294,29 @@ Behavior:
 
 - it returns a function with the same parameter and return types as `fn`
 - it evaluates `fn` inside a signal `computed(...)`
+- its calls are reactive but not memoized across invocations
 - it does not use an instance receiver
+- prefer `.queries({ ... })` for commonly needed instance methods
+- use `query(fn)` when a tracked helper is large, rarely needed, or better kept local to a consumer module for tree-shaking
+- query helpers do not need to live on the sigma state or in the same module as it
+
+## `batch`
+
+`batch` is re-exported from `@preact/signals`.
+
+## `effect`
+
+`effect` is re-exported from `@preact/signals`.
+
+## `freeze`
+
+`freeze` is re-exported from `immer`.
+
+A frozen object cannot be mutated through Immer drafts, including inside sigma actions.
+
+## `untracked`
+
+`untracked` is re-exported from `@preact/signals`.
 
 ## `useSigma`
 
