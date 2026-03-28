@@ -34,7 +34,9 @@ import {
   isSigmaState,
   listen,
   query,
+  replaceState,
   setAutoFreeze,
+  snapshot,
   untracked,
   useListener,
   useSigma,
@@ -179,6 +181,7 @@ Computeds are added with `.computed({ ... })`.
 Behavior:
 
 - each computed is exposed as a tracked getter property
+- computed getters are non-enumerable on the public instance
 - `this` inside a computed exposes readonly state plus other computeds
 - computeds do not receive query or action methods on `this`
 - computeds cannot accept arguments
@@ -328,6 +331,31 @@ Behavior:
 - `setAutoFreeze(false)` leaves later published public state unfrozen
 - `setAutoFreeze(true)` restores deep freezing for later publishes
 - the setting is shared across sigma state instances
+
+## `snapshot`
+
+`snapshot(instance)` returns a shallow snapshot of an instance's committed public state.
+
+Behavior:
+
+- the snapshot includes one own property for each top-level state key
+- each value comes from the current committed public state
+- the snapshot does not include computeds, queries, actions, events, or setup helpers
+- nested sigma states remain as referenced values; `snapshot(...)` does not recurse into their internal state
+- the return type is inferred from the instance's sigma-state definition
+
+## `replaceState`
+
+`replaceState(instance, snapshot)` replaces an instance's committed public state from a snapshot object.
+
+Behavior:
+
+- the replacement snapshot must be a plain object with exactly the instance's top-level state keys
+- it updates the committed public state without going through an action method
+- it notifies observers when the committed state changes
+- when observer patch generation is enabled, `replaceState(...)` also delivers patches and inverse patches
+- it throws if an action still owns unpublished changes
+- the snapshot parameter type is inferred from the instance's sigma-state definition
 
 ## `untracked`
 

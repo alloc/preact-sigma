@@ -2,7 +2,16 @@ import { computed } from "@preact/signals";
 import { enablePatches } from "immer";
 import { assert, test } from "vitest";
 
-import { immerable, listen, query, setAutoFreeze, SigmaType, type SigmaState } from "preact-sigma";
+import {
+  immerable,
+  listen,
+  query,
+  replaceState,
+  setAutoFreeze,
+  SigmaType,
+  snapshot,
+  type SigmaState,
+} from "preact-sigma";
 
 test("sigma states expose readonly state, computeds, queries, and actions", () => {
   type Todo = {
@@ -89,6 +98,32 @@ test("sigma states expose readonly state, computeds, queries, and actions", () =
   });
 
   stop();
+});
+
+test("snapshot returns committed public state and computed getters stay out of enumeration", () => {
+  const Counter = new SigmaType<{ count: number }>()
+    .defaultState({
+      count: 1,
+    })
+    .computed({
+      doubled() {
+        return this.count * 2;
+      },
+    })
+    .actions({
+      increment() {
+        this.count += 1;
+      },
+    });
+
+  const counter = new Counter();
+
+  assert.deepEqual(snapshot(counter), { count: 1 });
+  assert.deepEqual(Object.keys(counter), ["count"]);
+  assert.equal(
+    Object.getOwnPropertyDescriptor(Object.getPrototypeOf(counter), "doubled")?.enumerable,
+    false,
+  );
 });
 
 test("setup returns a single cleanup that owns nested resources", () => {
@@ -307,6 +342,109 @@ test("async actions can commit after await", async () => {
 
   assert.equal(counter.count, 2);
   assert.deepEqual(observed, [1, 2]);
+});
+
+test("replaceState restores committed state and notifies observers", () => {
+  enablePatches();
+
+  const observed: Array<{
+    count: number;
+    inversePatches: unknown[];
+    patches: unknown[];
+  }> = [];
+
+  const Counter = new SigmaType<{ count: number }>()
+    .defaultState({
+      count: 0,
+    })
+    .observe(
+      (change) => {
+        observed.push({
+          count: change.newState.count,
+          inversePatches: [...change.inversePatches],
+          patches: [...change.patches],
+        });
+      },
+      { patches: true },
+    )
+    .actions({
+      increment() {
+        this.count += 1;
+      },
+    });
+
+  const counter = new Counter();
+  const initial = snapshot(counter);
+
+  counter.increment();
+  replaceState(counter, initial);
+
+  assert.equal(counter.count, 0);
+  assert.lengthOf(observed, 2);
+  assert.sameDeepMembers(observed[1].inversePatches, [{ op: "replace", path: ["count"], value: 1 }]);
+  assert.sameDeepMembers(observed[1].patches, [{ op: "replace", path: ["count"], value: 0 }]);
+});
+
+test("replaceState validates snapshot shape", () => {
+  const Search = new SigmaType<{
+    draft: string;
+    page: number;
+  }>().defaultState({
+    draft: "",
+    page: 1,
+  });
+
+  const search = new Search();
+
+  assert.throws(() => {
+    replaceState(search, [] as unknown as { draft: string; page: number });
+  }, /requires a plain object snapshot/);
+
+  assert.throws(() => {
+    replaceState(search, { draft: "" } as unknown as { draft: string; page: number });
+  }, /Missing: page/);
+
+  assert.throws(() => {
+    replaceState(search, {
+      draft: "",
+      extra: true,
+      page: 1,
+    } as unknown as { draft: string; page: number });
+  }, /Extra: extra/);
+});
+
+test("replaceState throws while an async action has unpublished changes", async () => {
+  let release!: () => void;
+  const blocked = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+
+  const Counter = new SigmaType<{ count: number }>()
+    .defaultState({
+      count: 0,
+    })
+    .actions({
+      async stageIncrement() {
+        await Promise.resolve();
+        this.count += 1;
+        await blocked;
+        this.commit();
+      },
+    });
+
+  const counter = new Counter();
+  const pending = counter.stageIncrement();
+
+  await Promise.resolve();
+  await Promise.resolve();
+
+  assert.throws(() => {
+    replaceState(counter, snapshot(counter));
+  }, /stageIncrement/);
+
+  release();
+  await pending;
+  assert.equal(counter.count, 1);
 });
 
 test("async actions throw when they cross a boundary with unpublished changes", async () => {

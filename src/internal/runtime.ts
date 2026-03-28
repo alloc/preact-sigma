@@ -1,10 +1,17 @@
 import { batch, computed, type ReadonlySignal, Signal, signal, untracked } from "@preact/signals";
 import type { Patch } from "immer";
 import * as immer from "immer";
-import type { Draft } from "../immer";
+import type { Draft, Immutable } from "../immer";
 import { ContextOptions, getContext, getContextOwner, registerContextOwner } from "./context.js";
 import { reservedKeys, sigmaStateBrand, signalPrefix } from "./symbols.js";
-import type { AnyFunction, AnyResource, AnySigmaState, AnyState, Cleanup } from "./types.js";
+import type {
+  AnyFunction,
+  AnyResource,
+  AnySigmaState,
+  AnyState,
+  Cleanup,
+  SigmaState,
+} from "./types.js";
 
 export type SigmaTypeInternals = {
   actionFunctions: Record<string, AnyFunction>;
@@ -369,6 +376,44 @@ function disposeCleanupResource(resource: AnyResource) {
   }
 }
 
+function assertExactStateKeys(instance: SigmaInternals, nextState: AnyState) {
+  const extraKeys = Object.keys(nextState).filter((key) => !instance.stateKeys.has(key));
+  const missingKeys = [...instance.stateKeys].filter(
+    (key) => !Object.prototype.hasOwnProperty.call(nextState, key),
+  );
+
+  if (!extraKeys.length && !missingKeys.length) {
+    return;
+  }
+
+  let message = "[preact-sigma] replaceState() requires exactly the instance's state keys";
+  if (missingKeys.length) {
+    message += `. Missing: ${missingKeys.join(", ")}`;
+  }
+  if (extraKeys.length) {
+    message += `. Extra: ${extraKeys.join(", ")}`;
+  }
+  throw new Error(message);
+}
+
+function assertNoPendingDraft(operationName: string) {
+  const owner = currentDraftOwner;
+  if (!owner?.currentDraft) {
+    return;
+  }
+  throw new Error(
+    `[preact-sigma] ${operationName}() cannot run while action "${owner.actionName}" has unpublished changes. Call this.commit() before ${operationName}().`,
+  );
+}
+
+function snapshotState(instance: SigmaInternals) {
+  const snapshot = Object.create(null) as AnyState;
+  for (const key of instance.stateKeys) {
+    snapshot[key] = getSignal(instance, key).peek();
+  }
+  return snapshot;
+}
+
 function ensureOwnerDraft(owner: ActionOwner) {
   if (owner.currentDraft) {
     return owner.currentDraft;
@@ -415,6 +460,35 @@ function finalizeOwnerDraft(owner: ActionOwner): FinalizedDraftResult | undefine
   };
 }
 
+function finalizeReplacementState(
+  instance: SigmaInternals,
+  oldState: AnyState,
+  nextState: AnyState,
+): FinalizedDraftResult {
+  const draft = immer.createDraft(oldState);
+  for (const key of instance.stateKeys) {
+    draft[key] = nextState[key];
+  }
+
+  let patches: Patch[] | undefined;
+  let inversePatches: Patch[] | undefined;
+
+  const newState = instance.type.patchesEnabled
+    ? immer.finishDraft(draft, (nextPatches, nextInversePatches) => {
+        patches = nextPatches;
+        inversePatches = nextInversePatches;
+      })
+    : immer.finishDraft(draft);
+
+  return {
+    changed: newState !== oldState,
+    inversePatches,
+    newState,
+    oldState,
+    patches,
+  };
+}
+
 function isAsyncFunction(fn: AnyFunction) {
   return fn.constructor.name === "AsyncFunction";
 }
@@ -427,7 +501,7 @@ function publishState(instance: SigmaInternals, finalized: FinalizedDraftResult)
   batch(() => {
     for (const key of instance.stateKeys) {
       const nextValue = finalized.newState[key];
-      if (isAutoFreeze() && immer.isDraftable(nextValue)) {
+      if (isAutoFreeze()) {
         immer.freeze(nextValue, true);
       }
       const signal = getSignal(instance, key) as Signal<any>;
@@ -437,6 +511,45 @@ function publishState(instance: SigmaInternals, finalized: FinalizedDraftResult)
 
   for (const observer of instance.type.observeFunctions) {
     observer.call(getContext(instance, "observe"), finalized);
+  }
+}
+
+/**
+ * Returns a shallow snapshot of an instance's committed public state.
+ *
+ * The snapshot includes one own property for each top-level state key and reads
+ * the current committed value for that key. Its type is inferred from the
+ * instance's sigma-state definition.
+ */
+export function snapshot<T extends AnySigmaState>(
+  publicInstance: T,
+): T extends SigmaState<infer TDefinition> ? Immutable<TDefinition["state"]> : never {
+  return snapshotState(getSigmaInternals(publicInstance)) as any;
+}
+
+/**
+ * Replaces an instance's committed public state from a snapshot object.
+ *
+ * The replacement snapshot must be a plain object with exactly the instance's
+ * top-level state keys. Its type is inferred from the instance's sigma-state
+ * definition.
+ */
+export function replaceState<T extends AnySigmaState>(
+  publicInstance: T,
+  nextState: T extends SigmaState<infer TDefinition> ? Immutable<TDefinition["state"]> : never,
+) {
+  const instance = getSigmaInternals(publicInstance);
+  if (!isPlainObject(nextState)) {
+    throw new Error("[preact-sigma] replaceState() requires a plain object snapshot");
+  }
+
+  assertNoPendingDraft("replaceState");
+  assertExactStateKeys(instance, nextState);
+
+  const oldState = snapshot(publicInstance);
+  const finalized = finalizeReplacementState(instance, oldState, nextState);
+  if (finalized.changed) {
+    publishState(instance, finalized);
   }
 }
 
@@ -473,14 +586,6 @@ async function resolveAsyncActionResult(owner: ActionOwner, result: PromiseLike<
   }
 
   return settledValue;
-}
-
-function snapshotState(instance: SigmaInternals) {
-  const snapshot = Object.create(null) as AnyState;
-  for (const key of instance.stateKeys) {
-    snapshot[key] = getSignal(instance, key).peek();
-  }
-  return snapshot;
 }
 
 // oxlint-disable-next-line typescript/no-unsafe-declaration-merging

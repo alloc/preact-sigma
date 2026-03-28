@@ -28,6 +28,7 @@ With it, you can:
 - derive reactive values with computed getters and parameterized queries
 - publish state changes from synchronous or async actions
 - observe committed state changes and optional Immer patches
+- snapshot committed top-level state and replace committed state for undo-like flows
 - manage timers, listeners, nested state setup, and teardown through explicit cleanup
 - use the same model inside Preact components with `useSigma(...)` and `useListener(...)`
 
@@ -149,5 +150,6 @@ In Preact, the same constructor can be used with `useSigma(() => new TodoList(),
 - Keep top-level state properties meaningful. Each top-level property gets its own signal, so shape state around the reads you want to track.
 - Use `computed(...)` for argument-free derived state, and use queries for reactive reads that need parameters.
 - Put writes in actions. If an async action needs to publish changes after `await`, call `this.commit()` at the points where those writes should become public.
+- Use `snapshot(instance)` and `replaceState(instance, snapshot)` for committed-state replay. They work on top-level state keys and stay outside action semantics.
 - Use `setup(...)` for owned side effects, and always return cleanup resources for anything the instance starts.
 - Reach for `ref(...)` only when a top-level object, array, `Map`, or `Set` should intentionally stay mutable by reference.

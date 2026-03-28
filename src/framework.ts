@@ -31,7 +31,7 @@ import type {
 
 export { action, batch, computed, effect, untracked } from "@preact/signals";
 export { freeze, immerable } from "immer";
-export { setAutoFreeze } from "./internal/runtime.js";
+export { replaceState, setAutoFreeze, snapshot } from "./internal/runtime.js";
 
 export type {
   AnyDefaultState,
@@ -115,7 +115,6 @@ export class SigmaType<
           get: function (this: any) {
             return this[signalPrefix + key].value;
           },
-          enumerable: true,
         });
       }
       return this;

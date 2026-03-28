@@ -1,7 +1,16 @@
 import type { Patch } from "immer";
 import { assertType, expectTypeOf, test } from "vitest";
 
-import { action, immerable, query, setAutoFreeze, SigmaType, type SigmaState } from "preact-sigma";
+import {
+  action,
+  immerable,
+  query,
+  replaceState,
+  setAutoFreeze,
+  SigmaType,
+  snapshot,
+  type SigmaState,
+} from "preact-sigma";
 
 // @ts-expect-error shouldSetup is internal-only
 import { shouldSetup } from "preact-sigma";
@@ -87,6 +96,17 @@ test("sigma infers public state from the two-step declaration", () => {
   assertType<number>(todoList.completedCount);
   assertType<boolean>(todoList.canAdd());
   assertType<void>(todoList.setDraft("next"));
+  assertType<string>(snapshot(todoList).draft);
+  assertType<readonly Todo[]>(snapshot(todoList).todos);
+  assertType<void>(replaceState(todoList, snapshot(todoList)));
+  replaceState(todoList, {
+    draft: "ready",
+    todos: [],
+  });
+  // @ts-expect-error replaceState requires the full state shape
+  replaceState(todoList, {
+    draft: "missing todos",
+  });
   assertType<() => void>(todoList.setup("id"));
   assertType<() => void>(todoList.on("reset", () => {}));
   assertType<() => void>(
