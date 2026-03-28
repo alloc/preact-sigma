@@ -204,6 +204,27 @@ test("actions reuse one draft and can call queries, computeds, and other actions
   assert.equal(counter.isEven(), true);
 });
 
+test("actions throw when they return a promise and discard draft changes", () => {
+  const Counter = new SigmaType<{ count: number }>()
+    .defaultState({
+      count: 0,
+    })
+    .actions({
+      async incrementLater() {
+        this.count += 1;
+        await Promise.resolve();
+        this.count += 1;
+      },
+    });
+
+  const counter = new Counter();
+
+  assert.throws(() => {
+    counter.incrementLater();
+  }, /Actions must finish synchronously/);
+  assert.equal(counter.count, 0);
+});
+
 test("observe runs after committed base-state changes", () => {
   const observed: Array<{
     count: number;

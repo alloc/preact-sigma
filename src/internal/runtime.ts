@@ -150,7 +150,9 @@ export function runAction(
     throw new Error("[preact-sigma] Cannot run an action on a disposed sigma state");
   }
   if (instance.currentDraft) {
-    return actionFn.apply(actionContext, args);
+    const result = actionFn.apply(actionContext, args);
+    assertSynchronousActionResult(result);
+    return result;
   }
 
   const baseState = snapshotState(instance);
@@ -160,6 +162,7 @@ export function runAction(
   let ok = false;
   try {
     const result = actionFn.apply(actionContext, args);
+    assertSynchronousActionResult(result);
     ok = true;
     return result;
   } finally {
@@ -199,6 +202,19 @@ export function runAction(
         }
       }
     }
+  }
+}
+
+function assertSynchronousActionResult(result: unknown) {
+  if (
+    result &&
+    (typeof result === "object" || typeof result === "function") &&
+    typeof (result as PromiseLike<unknown>).then === "function"
+  ) {
+    void Promise.resolve(result).catch(() => {});
+    throw new Error(
+      "[preact-sigma] Actions must finish synchronously. Do async work outside the action and call actions before and after await.",
+    );
   }
 }
 
