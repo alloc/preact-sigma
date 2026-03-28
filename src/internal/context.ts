@@ -1,4 +1,4 @@
-import { getSignal, registerSigmaInternals, type SigmaInternals } from "./runtime.js";
+import { getSignal, registerSigmaInternals, Sigma, type SigmaInternals } from "./runtime.js";
 import { AnySigmaState } from "./types.js";
 
 type ContextKind =
@@ -73,11 +73,6 @@ const contextCache: Record<ContextKind, WeakMap<object, object>> = {
   setup: new WeakMap(),
 };
 let contextCacheFlushScheduled = false;
-let contextPrototype = Object.prototype;
-
-export function setContextPrototype(prototype: object) {
-  contextPrototype = prototype;
-}
 
 export function getContext(instance: SigmaInternals, kind: ContextKind) {
   const cachedContext = contextCache[kind].get(instance);
@@ -108,10 +103,10 @@ export function getContext(instance: SigmaInternals, kind: ContextKind) {
 }
 
 function createContext(instance: SigmaInternals, options: ContextOptions) {
-  return new Proxy(contextPrototype as AnySigmaState, {
+  return new Proxy(Sigma.prototype as AnySigmaState, {
     get(_target, key) {
-      if (Reflect.has(contextPrototype, key)) {
-        return Reflect.get(contextPrototype, key);
+      if (Reflect.has(Sigma.prototype, key)) {
+        return Reflect.get(Sigma.prototype, key);
       }
       if (typeof key !== "string") {
         return undefined;
