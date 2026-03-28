@@ -1,13 +1,6 @@
 import { batch, computed, type ReadonlySignal, Signal, signal, untracked } from "@preact/signals";
-import {
-  createDraft,
-  finishDraft,
-  freeze,
-  immerable,
-  isDraftable,
-  setAutoFreeze as setImmerAutoFreeze,
-  type Patch,
-} from "immer";
+import type { Patch } from "immer";
+import * as immer from "immer";
 import type { Draft } from "../immer";
 import { ContextOptions, getContext, getContextOwner, registerContextOwner } from "./context.js";
 import { reservedKeys, sigmaStateBrand, signalPrefix } from "./symbols.js";
@@ -78,9 +71,9 @@ export function isAutoFreeze() {
   return autoFreezeEnabled;
 }
 
-export function setRuntimeAutoFreeze(autoFreeze: boolean) {
+export function setAutoFreeze(autoFreeze: boolean) {
   autoFreezeEnabled = autoFreeze;
-  setImmerAutoFreeze(autoFreeze);
+  immer.setAutoFreeze(autoFreeze);
 }
 
 export function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -241,7 +234,7 @@ export function readActionStateValue(owner: ActionOwner, key: string, options: C
   const signal = getSignal(owner.instance, key);
   const committedValue = options.reactiveReads ? signal.value : signal.peek();
 
-  if (options.draftOnRead && isDraftable(committedValue)) {
+  if (options.draftOnRead && immer.isDraftable(committedValue)) {
     return ensureOwnerDraft(owner)[key];
   }
 
@@ -387,7 +380,7 @@ function ensureOwnerDraft(owner: ActionOwner) {
   // Every action phase is draft-lazy. A draft opens only on the first write or
   // on a read that needs draft-backed mutation semantics.
   owner.currentBase = snapshotState(owner.instance);
-  owner.currentDraft = createDraft(owner.currentBase);
+  owner.currentDraft = immer.createDraft(owner.currentBase);
   currentDraftOwner = owner;
 
   return owner.currentDraft;
@@ -406,11 +399,11 @@ function finalizeOwnerDraft(owner: ActionOwner): FinalizedDraftResult | undefine
   let inversePatches: Patch[] | undefined;
 
   const newState = owner.instance.type.patchesEnabled
-    ? finishDraft(currentDraft, (nextPatches, nextInversePatches) => {
+    ? immer.finishDraft(currentDraft, (nextPatches, nextInversePatches) => {
         patches = nextPatches;
         inversePatches = nextInversePatches;
       })
-    : finishDraft(currentDraft);
+    : immer.finishDraft(currentDraft);
 
   return {
     changed: newState !== oldState,
@@ -433,8 +426,8 @@ function publishState(instance: SigmaInternals, finalized: FinalizedDraftResult)
   batch(() => {
     for (const key of instance.stateKeys) {
       const nextValue = finalized.newState[key];
-      if (isAutoFreeze() && isDraftable(nextValue)) {
-        freeze(nextValue, true);
+      if (isAutoFreeze() && immer.isDraftable(nextValue)) {
+        immer.freeze(nextValue, true);
       }
       const signal = getSignal(instance, key) as Signal<any>;
       signal.value = nextValue;
@@ -537,5 +530,5 @@ export class Sigma extends EventTarget {
 }
 export interface Sigma {
   readonly [sigmaStateBrand]: true;
-  readonly [immerable]: true;
+  readonly [immer.immerable]: true;
 }

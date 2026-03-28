@@ -4,7 +4,6 @@ import {
   buildActionMethod,
   buildQueryMethod,
   initializeSigmaInstance,
-  setRuntimeAutoFreeze,
   Sigma,
   type SigmaTypeInternals,
 } from "./internal/runtime.js";
@@ -31,9 +30,8 @@ import type {
 } from "./internal/types.js";
 
 export { action, batch, computed, effect, untracked } from "@preact/signals";
-export { freeze } from "immer";
-/** Re-exported from Immer so custom classes can opt into drafting with `[immerable] = true`. */
-export { immerable } from "immer";
+export { freeze, immerable } from "immer";
+export { setAutoFreeze } from "./internal/runtime.js";
 
 export type {
   AnyDefaultState,
@@ -51,11 +49,6 @@ export type {
 /** Checks whether a value is a sigma-state instance. */
 export function isSigmaState(value: unknown): value is AnySigmaState {
   return Boolean(value && typeof value === "object" && (value as AnySigmaState)[sigmaStateBrand]);
-}
-
-/** Controls whether sigma deep-freezes published public state. Auto-freezing starts enabled. */
-export function setAutoFreeze(autoFreeze: boolean): void {
-  setRuntimeAutoFreeze(autoFreeze);
 }
 
 /** Creates a standalone tracked query function with the same signature as `fn`. */
