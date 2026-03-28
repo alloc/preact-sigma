@@ -1,6 +1,7 @@
 import type { ReadonlySignal } from "@preact/signals";
 import type { Patch } from "immer";
-import type { Draft, Immutable } from "../immer";
+import type { SigmaType } from "../framework.js";
+import type { Draft, Immutable } from "../immer.js";
 import { sigmaEventsBrand, sigmaRefBrand, sigmaStateBrand } from "./symbols.js";
 
 export type AnyFunction = (...args: any[]) => any;
@@ -100,6 +101,8 @@ export type ActionContext<
   ActionMethods<TActions> & {
     emit: Emit<TEvents>;
   };
+
+export type AnySigmaType = SigmaType<any, any, any, any, any, any, any>;
 
 /** The public shape shared by all sigma-state instances. */
 export type AnySigmaState = EventTarget & {

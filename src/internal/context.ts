@@ -1,4 +1,5 @@
-import { getSignal, registerInternalState, type SigmaInstance } from "./runtime.js";
+import { getSignal, registerSigmaInternals, type SigmaInternals } from "./runtime.js";
+import { AnySigmaState } from "./types.js";
 
 type ContextKind =
   | "action"
@@ -78,14 +79,14 @@ export function setContextPrototype(prototype: object) {
   contextPrototype = prototype;
 }
 
-export function getContext(instance: SigmaInstance, kind: ContextKind) {
+export function getContext(instance: SigmaInternals, kind: ContextKind) {
   const cachedContext = contextCache[kind].get(instance);
   if (cachedContext) {
     return cachedContext;
   }
 
   const context = createContext(instance, contextOptions[kind]);
-  registerInternalState(context, instance);
+  registerSigmaInternals(context, instance);
 
   contextCache[kind].set(instance, context);
   dirtyContexts[kind].add(instance);
@@ -106,8 +107,8 @@ export function getContext(instance: SigmaInstance, kind: ContextKind) {
   return context;
 }
 
-function createContext(instance: SigmaInstance, options: ContextOptions) {
-  return new Proxy(contextPrototype, {
+function createContext(instance: SigmaInternals, options: ContextOptions) {
+  return new Proxy(contextPrototype as AnySigmaState, {
     get(_target, key) {
       if (Reflect.has(contextPrototype, key)) {
         return Reflect.get(contextPrototype, key);

@@ -1,9 +1,17 @@
 import { action, computed, type ReadonlySignal, Signal, signal } from "@preact/signals";
 import { createDraft, finishDraft, freeze, isDraftable, type Patch } from "immer";
 import type { Draft } from "../immer";
-import { getContext } from "./context.js";
-import { reservedKeys, sigmaRefs, signalPrefix } from "./symbols.js";
-import type { AnyFunction, AnyResource, AnyState, Cleanup, SigmaObserveChange } from "./types.js";
+import { getContext, setContextPrototype } from "./context.js";
+import { reservedKeys, sigmaRefs, sigmaStateBrand, signalPrefix } from "./symbols.js";
+import type {
+  AnyFunction,
+  AnyResource,
+  AnySigmaState,
+  AnySigmaType,
+  AnyState,
+  Cleanup,
+  SigmaObserveChange,
+} from "./types.js";
 
 export type SigmaTypeInternals = {
   actions: Record<string, AnyFunction>;
@@ -18,7 +26,7 @@ export type SigmaTypeInternals = {
   setupFunctions: AnyFunction[];
 };
 
-export type SigmaInstance = {
+export type SigmaInternals = {
   currentDraft?: Draft<AnyState>;
   currentSetupCleanup?: Cleanup;
   publicInstance: EventTarget & object;
@@ -27,31 +35,31 @@ export type SigmaInstance = {
   disposed: boolean;
 };
 
-const internalStates = new WeakMap<object, SigmaInstance>();
-const builderStates = new WeakMap<object, SigmaTypeInternals>();
+const sigmaInternalsMap = new WeakMap<object, SigmaInternals>();
+const typeInternalsMap = new WeakMap<object, SigmaTypeInternals>();
 
-export function registerInternalState(context: object, instance: SigmaInstance) {
-  internalStates.set(context, instance);
+export function registerSigmaInternals(context: AnySigmaState, instance: SigmaInternals) {
+  sigmaInternalsMap.set(context, instance);
 }
 
-export function getInternalState(context: object): SigmaInstance {
-  const instance = internalStates.get(context);
+export function getSigmaInternals(context: AnySigmaState): SigmaInternals {
+  const instance = sigmaInternalsMap.get(context);
   if (!instance) {
     throw new Error("[preact-sigma] Invalid sigma context");
   }
   return instance;
 }
 
-export function registerBuilderState(builder: object, type: SigmaTypeInternals) {
-  builderStates.set(builder, type);
+export function registerTypeInternals(builder: AnySigmaType, type: SigmaTypeInternals) {
+  typeInternalsMap.set(builder, type);
 }
 
-export function getBuilderState(builder: object): SigmaTypeInternals {
-  const state = builderStates.get(builder);
-  if (!state) {
+export function getTypeInternals(type: AnySigmaType): SigmaTypeInternals {
+  const internalType = typeInternalsMap.get(type);
+  if (!internalType) {
     throw new Error("[preact-sigma] Invalid sigma type builder");
   }
-  return state;
+  return internalType;
 }
 
 export function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -82,12 +90,12 @@ export function createCleanup(resources: readonly AnyResource[]): Cleanup {
   };
 }
 
-export function getSignal(instance: SigmaInstance, key: string) {
+export function getSignal(instance: SigmaInternals, key: string) {
   return (instance.publicInstance as any)[signalPrefix + key] as ReadonlySignal<any>;
 }
 
 export function initializeSigmaInstance(
-  publicInstance: EventTarget & object,
+  publicInstance: AnySigmaState,
   type: SigmaTypeInternals,
   initialState: AnyState | undefined,
 ) {
@@ -102,7 +110,7 @@ export function initializeSigmaInstance(
     }
   }
 
-  const instance: SigmaInstance = {
+  const instance: SigmaInternals = {
     currentDraft: undefined,
     currentSetupCleanup: undefined,
     publicInstance,
@@ -137,12 +145,12 @@ export function initializeSigmaInstance(
     });
   }
 
-  registerInternalState(publicInstance, instance);
+  registerSigmaInternals(publicInstance, instance);
 }
 
 export function buildActionMethod(actionFn: AnyFunction) {
-  return action(function (this: object, ...args: any[]) {
-    const instance = getInternalState(this);
+  return action(function (this: AnySigmaState, ...args: any[]) {
+    const instance = getSigmaInternals(this);
     if (instance.disposed) {
       throw new Error("[preact-sigma] Cannot run an action on a disposed sigma state");
     }
@@ -230,10 +238,11 @@ export function assertDefinitionKeyAvailable(
   }
 }
 
-export function shouldSetup(
-  publicInstance: object,
-): publicInstance is { setup(...args: any[]): Cleanup } {
-  return getInternalState(publicInstance).type.setupFunctions.length > 0;
+export function shouldSetup(publicInstance: AnySigmaState): publicInstance is AnySigmaState & {
+  setup(...args: any[]): Cleanup;
+} {
+  const instance = getSigmaInternals(publicInstance);
+  return instance.type.setupFunctions.length > 0;
 }
 
 function disposeCleanupResource(resource: AnyResource) {
@@ -246,15 +255,69 @@ function disposeCleanupResource(resource: AnyResource) {
   }
 }
 
-function updateSignal(instance: SigmaInstance, key: string, value: unknown) {
+function updateSignal(instance: SigmaInternals, key: string, value: unknown) {
   const nextSignal = getSignal(instance, key) as Signal<any>;
   nextSignal.value = value;
 }
 
-function snapshotState(instance: SigmaInstance) {
+function snapshotState(instance: SigmaInternals) {
   const snapshot = Object.create(null) as AnyState;
   for (const key of instance.stateKeys) {
     snapshot[key] = getSignal(instance, key).peek();
   }
   return snapshot;
 }
+
+// oxlint-disable-next-line typescript/no-unsafe-declaration-merging
+export class Sigma extends EventTarget {
+  setup(...args: any[]): Cleanup {
+    const instance = getSigmaInternals(this);
+    if (!instance.type.setupFunctions.length) {
+      throw new Error("[preact-sigma] Setup is undefined for this sigma state");
+    }
+    if (instance.disposed) {
+      throw new Error("[preact-sigma] Cannot set up a disposed sigma state");
+    }
+    instance.currentSetupCleanup?.();
+    instance.currentSetupCleanup = undefined;
+
+    const cleanup = createCleanup(
+      instance.type.setupFunctions.flatMap((setup) => {
+        const result = setup.apply(getContext(instance, "setup"), args);
+        if (!Array.isArray(result)) {
+          throw new Error("[preact-sigma] Sigma setup handlers must return an array");
+        }
+        return result;
+      }),
+    );
+    instance.currentSetupCleanup = cleanup;
+    return cleanup;
+  }
+
+  get(key: string) {
+    const instance = getSigmaInternals(this);
+    return getSignal(instance, key);
+  }
+
+  on(name: string, listener: (...args: any[]) => void) {
+    const adapter: EventListener = (event) => {
+      const payload = (event as CustomEvent).detail;
+      if (payload === undefined) {
+        listener();
+      } else {
+        listener(payload);
+      }
+    };
+    this.addEventListener(name, adapter);
+    return () => {
+      this.removeEventListener(name, adapter);
+    };
+  }
+}
+export interface Sigma {
+  readonly [sigmaStateBrand]: true;
+}
+Object.defineProperty(Sigma.prototype, sigmaStateBrand, {
+  value: true,
+});
+setContextPrototype(Sigma.prototype);

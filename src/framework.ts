@@ -1,16 +1,15 @@
 import { computed } from "@preact/signals";
 import { isDraftable } from "immer";
-import { getContext, setContextPrototype } from "./internal/context.js";
+import { getContext } from "./internal/context.js";
 import {
   assertDefinitionKeyAvailable,
   buildActionMethod,
-  createCleanup,
-  getBuilderState,
-  getInternalState,
-  getSignal,
+  getSigmaInternals,
+  getTypeInternals,
   initializeSigmaInstance,
   isPlainObject,
-  registerBuilderState,
+  registerTypeInternals,
+  Sigma,
   type SigmaTypeInternals,
 } from "./internal/runtime.js";
 import { sigmaRefs, sigmaStateBrand, signalPrefix } from "./internal/symbols.js";
@@ -21,8 +20,8 @@ import type {
   AnyFunction,
   AnyResource,
   AnySigmaState,
+  AnySigmaType,
   AnyState,
-  Cleanup,
   ComputedContext,
   InitialStateInput,
   MergeObjects,
@@ -67,56 +66,6 @@ export function ref<T extends object>(value: T): SigmaRef<T> {
   return value as SigmaRef<T>;
 }
 
-class Sigma extends EventTarget {
-  setup(...args: any[]): Cleanup {
-    const instance = getInternalState(this);
-    if (!instance.type.setupFunctions.length) {
-      throw new Error("[preact-sigma] Setup is undefined for this sigma state");
-    }
-    if (instance.disposed) {
-      throw new Error("[preact-sigma] Cannot set up a disposed sigma state");
-    }
-    instance.currentSetupCleanup?.();
-    instance.currentSetupCleanup = undefined;
-
-    const cleanup = createCleanup(
-      instance.type.setupFunctions.flatMap((setup) => {
-        const result = setup.apply(getContext(instance, "setup"), args);
-        if (!Array.isArray(result)) {
-          throw new Error("[preact-sigma] Sigma setup handlers must return an array");
-        }
-        return result;
-      }),
-    );
-    instance.currentSetupCleanup = cleanup;
-    return cleanup;
-  }
-
-  get(key: string) {
-    const instance = getInternalState(this);
-    return getSignal(instance, key);
-  }
-
-  on(name: string, listener: (...args: any[]) => void) {
-    const adapter: EventListener = (event) => {
-      const payload = (event as CustomEvent).detail;
-      if (payload === undefined) {
-        listener();
-      } else {
-        listener(payload);
-      }
-    };
-    this.addEventListener(name, adapter);
-    return () => {
-      this.removeEventListener(name, adapter);
-    };
-  }
-}
-Object.defineProperty(Sigma.prototype, sigmaStateBrand, {
-  value: true,
-});
-setContextPrototype(Object.create(Sigma.prototype));
-
 /** Creates a standalone tracked query function with the same signature as `fn`. */
 export function query<TArgs extends any[], TResult>(fn: (this: void, ...args: TArgs) => TResult) {
   return ((...args: TArgs) => computed(() => fn(...args)).value) as typeof fn;
@@ -156,15 +105,14 @@ export class SigmaType<
           initializeSigmaInstance(this, type, initialState);
         }
       },
+    } as unknown as {
+      [name: string]: AnySigmaType;
     };
 
-    const { constructor: _constructor, ...builderDescriptors } = Object.getOwnPropertyDescriptors(
-      SigmaType.prototype,
-    );
-    Object.defineProperties(SigmaTypeBuilder, builderDescriptors);
-    registerBuilderState(SigmaTypeBuilder, type);
+    Object.setPrototypeOf(SigmaTypeBuilder, SigmaType.prototype);
+    registerTypeInternals(SigmaTypeBuilder, type);
 
-    return SigmaTypeBuilder as unknown as SigmaType<
+    return SigmaTypeBuilder as SigmaType<
       TState,
       TEvents,
       TDefaults,
@@ -179,13 +127,13 @@ export class SigmaType<
     if (!isPlainObject(defaultState)) {
       throw new Error("[preact-sigma] Sigma definitions require a plain object default state");
     }
-    const builderState = getBuilderState(this);
+    const type = getTypeInternals(this);
     for (const key in defaultState) {
       if (defaultState[key] === undefined) {
         continue;
       }
-      builderState.defaultState[key] = defaultState[key];
-      builderState.defaultStateKeys.push(key);
+      type.defaultState[key] = defaultState[key];
+      type.defaultStateKeys.push(key);
     }
     return this as unknown as SigmaType<
       TState,
@@ -202,11 +150,11 @@ export class SigmaType<
     computeds: TNextComputeds &
       ThisType<ComputedContext<TState, MergeObjects<TComputeds, TNextComputeds>>>,
   ) {
-    const builderState = getBuilderState(this);
+    const type = getTypeInternals(this);
     const nextKeys = Object.keys(computeds) as Array<Extract<keyof TNextComputeds, string>>;
     for (const key of nextKeys) {
-      assertDefinitionKeyAvailable(builderState, key, "computed");
-      builderState.computeds[key] = computeds[key] as AnyFunction;
+      assertDefinitionKeyAvailable(type, key, "computed");
+      type.computeds[key] = computeds[key] as AnyFunction;
 
       Object.defineProperty(this.prototype, key, {
         get: function (this: any) {
@@ -230,16 +178,16 @@ export class SigmaType<
     queries: TNextQueries &
       ThisType<ReadonlyContext<TState, TComputeds, MergeObjects<TQueries, TNextQueries>>>,
   ) {
-    const builderState = getBuilderState(this);
+    const type = getTypeInternals(this);
     const nextKeys = Object.keys(queries) as Array<Extract<keyof TNextQueries, string>>;
     for (const key of nextKeys) {
-      assertDefinitionKeyAvailable(builderState, key, "query");
+      assertDefinitionKeyAvailable(type, key, "query");
       const nextQuery = queries[key] as AnyFunction;
-      builderState.queries[key] = nextQuery;
+      type.queries[key] = nextQuery;
 
       Object.defineProperty(this.prototype, key, {
-        value: function (this: object, ...args: any[]) {
-          const instance = getInternalState(this);
+        value: function (this: AnySigmaState, ...args: any[]) {
+          const instance = getSigmaInternals(this);
           const queryContext = getContext(instance, "query");
           if (instance.currentDraft) {
             return nextQuery.apply(queryContext, args);
@@ -266,6 +214,7 @@ export class SigmaType<
     ) => void,
     options?: SigmaObserveOptions & { patches?: false | undefined },
   ): SigmaType<TState, TEvents, TDefaults, TComputeds, TQueries, TActions, TSetupArgs>;
+
   observe(
     listener: (
       this: ReadonlyContext<TState, TComputeds, TQueries>,
@@ -273,9 +222,10 @@ export class SigmaType<
     ) => void,
     options: SigmaObserveOptions & { patches: true },
   ): SigmaType<TState, TEvents, TDefaults, TComputeds, TQueries, TActions, TSetupArgs>;
+
   observe(listener: AnyFunction, options?: SigmaObserveOptions) {
-    const builderState = getBuilderState(this);
-    builderState.observeFunctions.push({
+    const type = getTypeInternals(this);
+    type.observeFunctions.push({
       patches: Boolean(options?.patches),
       listener,
     });
@@ -296,12 +246,12 @@ export class SigmaType<
         ActionContext<TState, TEvents, TComputeds, TQueries, MergeObjects<TActions, TNextActions>>
       >,
   ) {
-    const builderState = getBuilderState(this);
+    const type = getTypeInternals(this);
     const nextKeys = Object.keys(actions) as Array<Extract<keyof TNextActions, string>>;
     for (const key of nextKeys) {
-      assertDefinitionKeyAvailable(builderState, key, "action");
+      assertDefinitionKeyAvailable(type, key, "action");
       const nextAction = actions[key] as AnyFunction;
-      builderState.actions[key] = nextAction;
+      type.actions[key] = nextAction;
 
       Object.defineProperty(this.prototype, key, {
         value: buildActionMethod(nextAction),
@@ -331,8 +281,8 @@ export class SigmaType<
       ...args: TNextSetupArgs
     ) => readonly AnyResource[],
   ) {
-    const builderState = getBuilderState(this);
-    builderState.setupFunctions.push(setup);
+    const type = getTypeInternals(this);
+    type.setupFunctions.push(setup);
 
     return this as unknown as SigmaType<
       TState,

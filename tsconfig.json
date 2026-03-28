@@ -1,5 +1,5 @@
 {
-  "include": ["src", "dist"],
+  "include": ["dist"],
   "compilerOptions": {
     "strict": true,
     "lib": ["dom", "esnext"],
