@@ -1,7 +1,7 @@
 import type { Patch } from "immer";
 import { assertType, expectTypeOf, test } from "vitest";
 
-import { action, immerable, query, SigmaType, type SigmaState } from "preact-sigma";
+import { action, immerable, query, setAutoFreeze, SigmaType, type SigmaState } from "preact-sigma";
 
 // @ts-expect-error shouldSetup is internal-only
 import { shouldSetup } from "preact-sigma";
@@ -123,6 +123,7 @@ test("sigma infers public state from the two-step declaration", () => {
     count = 1;
   }
 
+  assertType<void>(setAutoFreeze(false));
   assertType<MutableCache>(new MutableCache());
   assertType<DraftableCache>(new DraftableCache());
 

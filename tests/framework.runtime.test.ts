@@ -2,7 +2,7 @@ import { computed } from "@preact/signals";
 import { enablePatches } from "immer";
 import { assert, test } from "vitest";
 
-import { immerable, listen, query, SigmaType, type SigmaState } from "preact-sigma";
+import { immerable, listen, query, setAutoFreeze, SigmaType, type SigmaState } from "preact-sigma";
 
 test("sigma states expose readonly state, computeds, queries, and actions", () => {
   type Todo = {
@@ -715,4 +715,49 @@ test("top-level custom class instances stay mutable by reference unless marked i
   assert.equal(initialDraftableCache.getCount(), 1);
   assert.notStrictEqual(store.draftableCache, initialDraftableCache);
   assert.equal(store.draftableCache.getCount(), 2);
+});
+
+test("setAutoFreeze controls deep runtime freezing of published state", () => {
+  const Store = new SigmaType<{
+    config: {
+      nested: {
+        count: number;
+      };
+      tags: string[];
+    };
+  }>()
+    .defaultState({
+      config: {
+        nested: { count: 1 },
+        tags: ["a"],
+      },
+    })
+    .actions({
+      replaceConfig() {
+        this.config = {
+          nested: { count: 2 },
+          tags: ["a", "b"],
+        };
+      },
+    });
+
+  try {
+    setAutoFreeze(true);
+    const frozenStore = new Store();
+    frozenStore.replaceConfig();
+
+    assert.equal(Object.isFrozen(frozenStore.config), true);
+    assert.equal(Object.isFrozen(frozenStore.config.nested), true);
+    assert.equal(Object.isFrozen(frozenStore.config.tags), true);
+
+    setAutoFreeze(false);
+    const unfrozenStore = new Store();
+    unfrozenStore.replaceConfig();
+
+    assert.equal(Object.isFrozen(unfrozenStore.config), false);
+    assert.equal(Object.isFrozen(unfrozenStore.config.nested), false);
+    assert.equal(Object.isFrozen(unfrozenStore.config.tags), false);
+  } finally {
+    setAutoFreeze(true);
+  }
 });

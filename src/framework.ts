@@ -4,6 +4,7 @@ import {
   buildActionMethod,
   buildQueryMethod,
   initializeSigmaInstance,
+  setRuntimeAutoFreeze,
   Sigma,
   type SigmaTypeInternals,
 } from "./internal/runtime.js";
@@ -50,6 +51,11 @@ export type {
 /** Checks whether a value is a sigma-state instance. */
 export function isSigmaState(value: unknown): value is AnySigmaState {
   return Boolean(value && typeof value === "object" && (value as AnySigmaState)[sigmaStateBrand]);
+}
+
+/** Controls whether sigma deep-freezes published public state. Auto-freezing starts enabled. */
+export function setAutoFreeze(autoFreeze: boolean): void {
+  setRuntimeAutoFreeze(autoFreeze);
 }
 
 /** Creates a standalone tracked query function with the same signature as `fn`. */

@@ -34,6 +34,7 @@ import {
   isSigmaState,
   listen,
   query,
+  setAutoFreeze,
   untracked,
   useListener,
   useSigma,
@@ -210,7 +211,7 @@ Behavior:
 - actions may call other actions, queries, and computeds
 - same-instance sync nested action calls reuse the current draft
 - `this.commit()` publishes the current draft immediately
-- successful publishes freeze the resulting public state and write it back to per-property signals
+- successful publishes deep-freeze the resulting public state and write it back to per-property signals while auto-freezing is enabled
 - top-level custom class instances stay mutable by reference unless the class opts into drafting with `[immerable] = true`
 - actions can emit typed events with `this.emit(...)`
 - `emit()` and action calls that would start a different invocation are boundaries
@@ -316,6 +317,17 @@ Behavior:
 `freeze` is re-exported from `immer`.
 
 A frozen object cannot be mutated through Immer drafts, including inside sigma actions.
+
+## `setAutoFreeze`
+
+`setAutoFreeze(autoFreeze)` controls whether sigma deep-freezes published public state at runtime.
+
+Behavior:
+
+- auto-freezing starts enabled
+- `setAutoFreeze(false)` leaves later published public state unfrozen
+- `setAutoFreeze(true)` restores deep freezing for later publishes
+- the setting is shared across sigma state instances
 
 ## `untracked`
 

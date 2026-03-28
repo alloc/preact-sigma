@@ -1,5 +1,13 @@
 import { batch, computed, type ReadonlySignal, Signal, signal, untracked } from "@preact/signals";
-import { createDraft, finishDraft, freeze, immerable, isDraftable, type Patch } from "immer";
+import {
+  createDraft,
+  finishDraft,
+  freeze,
+  immerable,
+  isDraftable,
+  setAutoFreeze as setImmerAutoFreeze,
+  type Patch,
+} from "immer";
 import type { Draft } from "../immer";
 import { ContextOptions, getContext, getContextOwner, registerContextOwner } from "./context.js";
 import { reservedKeys, sigmaStateBrand, signalPrefix } from "./symbols.js";
@@ -39,6 +47,7 @@ export type SigmaInternals = {
 };
 
 const sigmaInternalsMap = new WeakMap<object, SigmaInternals>();
+let autoFreezeEnabled = true;
 
 let nextActionOwnerId = 1;
 // At most one action draft may exist at a time. Same-instance sync nested
@@ -63,6 +72,15 @@ export function getSigmaInternals(context: object): SigmaInternals {
     throw new Error("[preact-sigma] Invalid sigma context");
   }
   return instance;
+}
+
+export function isAutoFreeze() {
+  return autoFreezeEnabled;
+}
+
+export function setRuntimeAutoFreeze(autoFreeze: boolean) {
+  autoFreezeEnabled = autoFreeze;
+  setImmerAutoFreeze(autoFreeze);
 }
 
 export function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -415,8 +433,8 @@ function publishState(instance: SigmaInternals, finalized: FinalizedDraftResult)
   batch(() => {
     for (const key of instance.stateKeys) {
       const nextValue = finalized.newState[key];
-      if (isDraftable(nextValue)) {
-        freeze(nextValue);
+      if (isAutoFreeze() && isDraftable(nextValue)) {
+        freeze(nextValue, true);
       }
       const signal = getSignal(instance, key) as Signal<any>;
       signal.value = nextValue;
