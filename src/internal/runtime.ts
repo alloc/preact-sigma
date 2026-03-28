@@ -71,6 +71,7 @@ export function isAutoFreeze() {
   return autoFreezeEnabled;
 }
 
+/** Controls whether sigma deep-freezes published public state. Auto-freezing starts enabled. */
 export function setAutoFreeze(autoFreeze: boolean) {
   autoFreezeEnabled = autoFreeze;
   immer.setAutoFreeze(autoFreeze);
