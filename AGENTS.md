@@ -1,9 +1,10 @@
 - API descriptions
-  - Keep public API descriptions factual and behavioral. Move prescriptive advice and conventions to a separate best-practices document.
+  - Add concise, factual, behavioral API descriptions in source code for public API members. Move prescriptive advice and conventions to a separate best-practices document.
   - State clearly where type inference comes from when that affects how the API should be written or consumed.
   - Prefer positive framing in API documentation. Describe what something does or receives, and avoid mixing positive and negative framing in the same explanation.
   - Label reactivity clearly in API documentation so it is obvious which values are reactive and when an API makes a value reactive.
   - Call out especially useful behavior when it clarifies intent, particularly for nested or non-obvious use cases.
+  - Prefer plain prose doc comments over JSDoc tags like `@param` and `@returns`, and use those tags only when they materially clarify a complex API.
   - Keep AI-specific authoring conventions, naming guidance, and other best-practice material out of the public API surface.
 - Performance guidance
   - Avoid speculative performance memoization. Prefer plain derivation until benchmarks justify caching, and if one cached derivation is kept, make the tradeoff explicit.
