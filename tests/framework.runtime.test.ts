@@ -231,6 +231,26 @@ test("commit publishes an explicit boundary inside sync actions", () => {
   assert.deepEqual(observed, [1, 2]);
 });
 
+test("non-async actions that return promises throw and discard draft changes", () => {
+  const Counter = new SigmaType<{ count: number }>()
+    .defaultState({
+      count: 0,
+    })
+    .actions({
+      incrementLater() {
+        this.count += 1;
+        return Promise.resolve();
+      },
+    });
+
+  const counter = new Counter();
+
+  assert.throws(() => {
+    counter.incrementLater();
+  }, /must use native async-await syntax to return a promise/);
+  assert.equal(counter.count, 0);
+});
+
 test("async actions auto-commit sync work and reject when they settle with unpublished changes", async () => {
   const Counter = new SigmaType<{ count: number }>()
     .defaultState({

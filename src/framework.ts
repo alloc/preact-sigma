@@ -284,7 +284,8 @@ export interface SigmaType<
    * instance reuse the current draft, so they can compose and publish once when
    * the outer action returns. Declared async actions publish their initial
    * synchronous work on return, then require `this.commit()` to publish later
-   * writes made after `await`.
+   * writes made after `await`. Non-async actions stay synchronous; if one
+   * returns a promise, sigma throws so async boundaries stay explicit.
    */
   actions<TNextActions extends object>(
     actions: TNextActions &

@@ -164,6 +164,8 @@ export function buildQueryMethod(queryFunction: AnyFunction) {
 }
 
 export function buildActionMethod(actionName: string, actionFn: AnyFunction) {
+  const actionIsAsync = isAsyncFunction(actionFn);
+
   return function (this: AnySigmaState, ...args: any[]) {
     const instance = getSigmaInternals(this);
     if (instance.disposed) {
@@ -174,7 +176,7 @@ export function buildActionMethod(actionName: string, actionFn: AnyFunction) {
       let owner: ActionOwner;
 
       const callerOwner = getContextOwner(this);
-      if (callerOwner && callerOwner.instance === instance) {
+      if (callerOwner && callerOwner.instance === instance && !actionIsAsync) {
         owner = callerOwner;
       } else {
         handleActionBoundary(callerOwner, "action", actionName);
@@ -187,6 +189,18 @@ export function buildActionMethod(actionName: string, actionFn: AnyFunction) {
       } catch (error) {
         clearCurrentDraft(owner);
         throw error;
+      }
+
+      if (!actionIsAsync && isPromiseLike(result)) {
+        clearCurrentDraft(owner);
+        void Promise.resolve(result).catch(() => {});
+        throw new Error(
+          `[preact-sigma] Action "${actionName}" must use native async-await syntax to return a promise.`,
+        );
+      }
+
+      if (owner === callerOwner) {
+        return result;
       }
 
       const finalized = finalizeOwnerDraft(owner);
@@ -391,6 +405,10 @@ function finalizeOwnerDraft(owner: ActionOwner): FinalizedDraftResult | undefine
     oldState,
     patches,
   };
+}
+
+function isAsyncFunction(fn: AnyFunction) {
+  return fn.constructor.name === "AsyncFunction";
 }
 
 function isPromiseLike(value: unknown): value is PromiseLike<unknown> {

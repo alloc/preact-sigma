@@ -214,6 +214,7 @@ Behavior:
 - successful publishes freeze the resulting public state and write it back to per-property signals
 - actions can emit typed events with `this.emit(...)`
 - `emit()` and action calls that would start a different invocation are boundaries
+- non-async actions must stay synchronous; if one returns a promise, sigma throws
 - if an async action reaches `await` or `return` with unpublished changes, the action promise rejects when it settles
 - if an action crosses a boundary while it owns unpublished changes, sigma throws until `this.commit()` publishes them
 - if a different invocation crosses a boundary while unpublished changes still exist, sigma warns and discards them before continuing
