@@ -12,15 +12,20 @@ type Disposable = {
   [Symbol.dispose](): void;
 };
 
+/** The event map shape used by sigma types. */
 export type AnyEvents = Record<string, object | void>;
+/** The top-level state object shape used by sigma types. */
 export type AnyState = Record<string, unknown>;
 
+/** The object accepted by `.defaultState(...)`. */
 export type AnyDefaultState<TState extends AnyState> = {
   [K in keyof TState]?: DefaultStateValue<TState[K]>;
 };
 
+/** A cleanup resource supported by `.setup(...)`. */
 export type AnyResource = Cleanup | Disposable | AbortController;
 
+/** A value marked with `ref(...)`. */
 export type SigmaRef<T extends object = object> = T & {
   readonly [sigmaRefBrand]: true;
 };
@@ -96,18 +101,22 @@ export type ActionContext<
     emit: Emit<TEvents>;
   };
 
+/** The public shape shared by all sigma-state instances. */
 export type AnySigmaState = EventTarget & {
   readonly [sigmaStateBrand]: true;
 };
 
+/** A sigma-state instance with a typed event map. */
 export type AnySigmaStateWithEvents<TEvents extends AnyEvents> = AnySigmaState & {
   readonly [sigmaEventsBrand]: TEvents;
 };
 
+/** Options accepted by `.observe(...)`. */
 export type SigmaObserveOptions = {
   patches?: boolean;
 };
 
+/** The change object delivered to `.observe(...)` listeners. */
 export type SigmaObserveChange<TState extends AnyState, TWithPatches extends boolean = false> = {
   readonly previousState: Immutable<TState>;
   readonly state: Immutable<TState>;
@@ -148,6 +157,7 @@ type MapSigmaDefinition<T extends SigmaDefinition> = keyof T extends infer K
               : never
   : never;
 
+/** The public instance shape produced by a configured sigma type. */
 export type SigmaState<T extends SigmaDefinition = SigmaDefinition> = AnySigmaState &
   UnionToIntersection<
     | MapSigmaDefinition<T>
@@ -194,6 +204,7 @@ export type OmitEmpty<T extends object> = {} & Omit<
   { [K in keyof T]: [undefined] extends [T[K]] ? K : [{}] extends [T[K]] ? K : never }[keyof T]
 >;
 
+/** Infers the `setup(...)` argument list for a sigma-state instance. */
 export type InferSetupArgs<T extends AnySigmaState> = T extends {
   setup(...args: infer TArgs extends any[]): Cleanup;
 }

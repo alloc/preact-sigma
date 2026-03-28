@@ -53,10 +53,12 @@ export type {
   SigmaState,
 } from "./internal/types.js";
 
+/** Checks whether a value is a sigma-state instance. */
 export function isSigmaState(value: unknown): value is AnySigmaState {
   return Boolean(value && typeof value === "object" && (value as AnySigmaState)[sigmaStateBrand]);
 }
 
+/** Marks a draftable value so sigma keeps that top-level state value by reference. */
 export function ref<T extends object>(value: T): SigmaRef<T> {
   if (!isDraftable(value)) {
     throw new Error("[preact-sigma] ref() accepts only an object that can be drafted by Immer");
@@ -115,10 +117,15 @@ Object.defineProperty(Sigma.prototype, sigmaStateBrand, {
 });
 setContextPrototype(Object.create(Sigma.prototype));
 
+/** Creates a standalone tracked query function with the same signature as `fn`. */
 export function query<TArgs extends any[], TResult>(fn: (this: void, ...args: TArgs) => TResult) {
   return ((...args: TArgs) => computed(() => fn(...args)).value) as typeof fn;
 }
 
+/**
+ * Builds sigma-state constructors by accumulating default state, computeds, queries,
+ * observers, actions, and setup handlers.
+ */
 // oxlint-disable-next-line typescript/no-unsafe-declaration-merging
 export class SigmaType<
   TState extends AnyState,
@@ -341,6 +348,7 @@ export class SigmaType<
   }
 }
 
+/** The constructor shape exposed by a configured sigma type. */
 export interface SigmaType<
   TState extends AnyState,
   TEvents extends AnyEvents,
