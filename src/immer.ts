@@ -1,6 +1,6 @@
 // Copied from: node_modules/.pnpm/immer@11.1.4/node_modules/immer/dist/immer.d.ts
-// Adapted to skip SigmaRef and SigmaStateLike types.
-import type { AnySigmaState, SigmaRef } from "./internal/types.js";
+// Adapted to skip sigma-state instances.
+import type { AnySigmaState } from "./internal/types.js";
 
 type PrimitiveType = number | string | boolean;
 
@@ -11,8 +11,7 @@ type AtomicObject =
   | Date
   | RegExp
   | EventTarget
-  | AnySigmaState
-  | SigmaRef;
+  | AnySigmaState;
 
 /**
  * If the lib "ES2015.Collection" is not included in tsconfig.json,

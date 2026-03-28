@@ -2,7 +2,7 @@ import type { ReadonlySignal } from "@preact/signals";
 import type { Patch } from "immer";
 import type { SigmaType } from "../framework.js";
 import type { Draft, Immutable } from "../immer.js";
-import { sigmaEventsBrand, sigmaRefBrand, sigmaStateBrand } from "./symbols.js";
+import { sigmaEventsBrand, sigmaStateBrand } from "./symbols.js";
 
 export type AnyFunction = (...args: any[]) => any;
 
@@ -25,11 +25,6 @@ export type AnyDefaultState<TState extends AnyState> = {
 
 /** A cleanup resource supported by `.setup(...)`. */
 export type AnyResource = Cleanup | Disposable | AbortController;
-
-/** A value marked with `ref(...)`. */
-export type SigmaRef<T extends object = object> = T & {
-  readonly [sigmaRefBrand]: true;
-};
 
 export type ComputedValues<TComputeds extends object | undefined> = [undefined] extends [TComputeds]
   ? never

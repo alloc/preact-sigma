@@ -1,5 +1,4 @@
 import { computed } from "@preact/signals";
-import { isDraftable } from "immer";
 import {
   assertDefinitionKeyAvailable,
   buildActionMethod,
@@ -8,7 +7,7 @@ import {
   Sigma,
   type SigmaTypeInternals,
 } from "./internal/runtime.js";
-import { sigmaRefs, sigmaStateBrand, signalPrefix } from "./internal/symbols.js";
+import { sigmaStateBrand, signalPrefix } from "./internal/symbols.js";
 import type {
   ActionContext,
   AnyDefaultState,
@@ -27,12 +26,13 @@ import type {
   SigmaDefinition,
   SigmaObserveChange,
   SigmaObserveOptions,
-  SigmaRef,
   SigmaState,
 } from "./internal/types.js";
 
 export { action, batch, computed, effect, untracked } from "@preact/signals";
 export { freeze } from "immer";
+/** Re-exported from Immer so custom classes can opt into drafting with `[immerable] = true`. */
+export { immerable } from "immer";
 
 export type {
   AnyDefaultState,
@@ -44,22 +44,12 @@ export type {
   InferSetupArgs,
   SigmaObserveChange,
   SigmaObserveOptions,
-  SigmaRef,
   SigmaState,
 } from "./internal/types.js";
 
 /** Checks whether a value is a sigma-state instance. */
 export function isSigmaState(value: unknown): value is AnySigmaState {
   return Boolean(value && typeof value === "object" && (value as AnySigmaState)[sigmaStateBrand]);
-}
-
-/** Marks a draftable value so sigma keeps that top-level state value by reference. */
-export function ref<T extends object>(value: T): SigmaRef<T> {
-  if (!isDraftable(value)) {
-    throw new Error("[preact-sigma] ref() accepts only an object that can be drafted by Immer");
-  }
-  sigmaRefs.add(value);
-  return value as SigmaRef<T>;
 }
 
 /** Creates a standalone tracked query function with the same signature as `fn`. */

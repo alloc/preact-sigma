@@ -1,12 +1,24 @@
 import { useState } from "preact/hooks";
 
-import { listen, query, ref, SigmaType, useListener, useSigma, type SigmaRef } from "preact-sigma";
+import { listen, query, SigmaType, useListener, useSigma } from "preact-sigma";
 
 type Command = {
   id: string;
   title: string;
   keywords: readonly string[];
 };
+
+class UsageLedger {
+  counts = new Map<string, number>();
+
+  get(id: string) {
+    return this.counts.get(id) ?? 0;
+  }
+
+  increment(id: string) {
+    this.counts.set(id, this.get(id) + 1);
+  }
+}
 
 const matchesText = query((command: Command, draft: string) => {
   const needle = draft.trim().toLowerCase();
@@ -45,7 +57,7 @@ const CommandPalette = new SigmaType<
     cursor: number;
     draft: string;
     history: SearchHistory;
-    usage: SigmaRef<Map<string, number>>;
+    usage: UsageLedger;
   },
   {
     ran: Command;
@@ -61,7 +73,7 @@ const CommandPalette = new SigmaType<
     cursor: 0,
     draft: "",
     history: () => new SearchHistory(),
-    usage: () => ref(new Map<string, number>()),
+    usage: () => new UsageLedger(),
   })
   .computed({
     visibleCommands() {
@@ -76,7 +88,7 @@ const CommandPalette = new SigmaType<
       return this.activeCommand !== null;
     },
     usageCount(id: string) {
-      return this.usage.get(id) ?? 0;
+      return this.usage.get(id);
     },
   })
   .actions({
@@ -106,7 +118,7 @@ const CommandPalette = new SigmaType<
       }
 
       this.history.remember(this.draft || command.title);
-      this.usage.set(command.id, this.usageCount(command.id) + 1);
+      this.usage.increment(command.id);
       this.emit("ran", command);
       this.draft = "";
       this.cursor = 0;
@@ -151,7 +163,7 @@ export function Showcase() {
     <section>
       <p>
         <strong>V2 showcase</strong>: setup-owned keyboard shortcuts, computed getters, tracked
-        queries with args, typed events, nested sigma state, and a mutable `ref(Map)`.
+        queries with args, typed events, nested sigma state, and a mutable custom class instance.
       </p>
 
       <label>

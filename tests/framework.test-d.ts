@@ -1,7 +1,7 @@
 import type { Patch } from "immer";
 import { assertType, expectTypeOf, test } from "vitest";
 
-import { action, query, ref, SigmaType, type SigmaState } from "preact-sigma";
+import { action, immerable, query, SigmaType, type SigmaState } from "preact-sigma";
 
 // @ts-expect-error shouldSetup is internal-only
 import { shouldSetup } from "preact-sigma";
@@ -114,13 +114,17 @@ test("sigma infers public state from the two-step declaration", () => {
   const hasText = query((value: string) => value.length > 0);
   expectTypeOf(hasText).toEqualTypeOf<(value: string) => boolean>();
 
-  assertType<{ count: number }>(ref({ count: 1 }));
-  assertType<string[]>(ref(["a"]));
-  assertType<Map<string, number>>(ref(new Map<string, number>()));
-  assertType<Set<string>>(ref(new Set<string>()));
+  class MutableCache {
+    count = 1;
+  }
 
-  // @ts-expect-error ref only accepts plain objects, arrays, maps, and sets
-  ref(123);
+  class DraftableCache {
+    [immerable] = true as const;
+    count = 1;
+  }
+
+  assertType<MutableCache>(new MutableCache());
+  assertType<DraftableCache>(new DraftableCache());
 
   const Search = new SigmaType<{ count: number }>().defaultState({
     count: 0,

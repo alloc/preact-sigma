@@ -30,10 +30,10 @@ import {
   computed,
   effect,
   freeze,
+  immerable,
   isSigmaState,
   listen,
   query,
-  ref,
   untracked,
   useListener,
   useSigma,
@@ -53,7 +53,6 @@ import {
 - `InferListener`: Infers the listener signature for a target and event name.
 - `SigmaObserveChange`: Describes the object received by `.observe(...)` listeners.
 - `SigmaObserveOptions`: Describes the options object accepted by `.observe(...)`.
-- `SigmaRef`: Describes a value marked with `ref(...)`.
 - `SigmaState`: Describes the public instance shape produced by a configured sigma type.
 
 ## Declaration Pattern
@@ -212,6 +211,7 @@ Behavior:
 - same-instance sync nested action calls reuse the current draft
 - `this.commit()` publishes the current draft immediately
 - successful publishes freeze the resulting public state and write it back to per-property signals
+- top-level custom class instances stay mutable by reference unless the class opts into drafting with `[immerable] = true`
 - actions can emit typed events with `this.emit(...)`
 - `emit()` and action calls that would start a different invocation are boundaries
 - non-async actions must stay synchronous; if one returns a promise, sigma throws
@@ -279,17 +279,15 @@ Behavior:
 - `.on(name, listener)` returns an unsubscribe function
 - listeners receive the payload directly, or no argument for `void` events
 
-## `ref`
+## `immerable`
 
-`ref(value)` marks a plain object, array, `Map`, or `Set` so v2 does not freeze that top-level state value when it becomes public state.
+`immerable` is re-exported from Immer so custom classes can opt into drafting with `[immerable] = true`.
 
 Behavior:
 
-- returns the same value that was passed in
-- accepts only a plain object, array, `Map`, or `Set`
-- keeps that top-level state value mutable by reference after public reads
-
-Use `ref(...)` for values like `Map`, `Set`, or mutable caches that should remain mutable without being copied or frozen.
+- unmarked custom class instances stay mutable by reference when stored as top-level sigma state
+- marking a class with `[immerable] = true` makes that class participate in Immer drafting and freezing
+- plain objects, arrays, `Map`, and `Set` already participate in normal Immer drafting without extra markers
 
 ## `query(fn)`
 

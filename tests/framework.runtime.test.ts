@@ -2,7 +2,7 @@ import { computed } from "@preact/signals";
 import { enablePatches } from "immer";
 import { assert, test } from "vitest";
 
-import { listen, query, ref, SigmaType, type SigmaState } from "preact-sigma";
+import { immerable, listen, query, SigmaType, type SigmaState } from "preact-sigma";
 
 test("sigma states expose readonly state, computeds, queries, and actions", () => {
   type Todo = {
@@ -667,36 +667,52 @@ test("nested sigma states can be stored in state without being mutated through a
   assert.equal(parent.child.count, 1);
 });
 
-test("ref prevents freezing of top-level plain objects, arrays, maps, and sets", () => {
-  const objectRef = ref({ count: 1 });
-  const arrayRef = ref(["a"]);
-  const mapRef = ref(new Map([["a", 1]]));
-  const setRef = ref(new Set(["a"]));
+test("top-level custom class instances stay mutable by reference unless marked immerable", () => {
+  class MutableCache {
+    count = 1;
+    entries = new Map([["a", 1]]);
+
+    increment() {
+      this.count += 1;
+    }
+
+    record(key: string, value: number) {
+      this.entries.set(key, value);
+    }
+  }
+
+  class DraftableCache {
+    [immerable] = true as const;
+    count = 1;
+
+    getCount() {
+      return this.count;
+    }
+  }
 
   const Store = new SigmaType<{
-    objectRef: typeof objectRef;
-    arrayRef: typeof arrayRef;
-    mapRef: typeof mapRef;
-    setRef: typeof setRef;
+    mutableCache: MutableCache;
+    draftableCache: DraftableCache;
   }>().defaultState({
-    objectRef,
-    arrayRef,
-    mapRef,
-    setRef,
+    mutableCache: () => new MutableCache(),
+    draftableCache: () => new DraftableCache(),
+  })
+  .actions({
+    incrementDraftableCache() {
+      this.draftableCache.count += 1;
+    },
   });
 
   const store = new Store();
+  const initialDraftableCache = store.draftableCache;
 
-  assert.equal(Object.isFrozen(store.objectRef), false);
-  assert.equal(Object.isFrozen(store.arrayRef), false);
+  store.mutableCache.increment();
+  store.mutableCache.record("b", 2);
+  store.incrementDraftableCache();
 
-  store.objectRef.count += 1;
-  store.arrayRef.push("b");
-  store.mapRef.set("b", 2);
-  store.setRef.add("b");
-
-  assert.equal(store.objectRef.count, 2);
-  assert.deepEqual(store.arrayRef, ["a", "b"]);
-  assert.equal(store.mapRef.get("b"), 2);
-  assert.equal(store.setRef.has("b"), true);
+  assert.equal(store.mutableCache.count, 2);
+  assert.equal(store.mutableCache.entries.get("b"), 2);
+  assert.equal(initialDraftableCache.getCount(), 1);
+  assert.notStrictEqual(store.draftableCache, initialDraftableCache);
+  assert.equal(store.draftableCache.getCount(), 2);
 });

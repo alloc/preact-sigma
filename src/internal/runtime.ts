@@ -2,7 +2,7 @@ import { batch, computed, type ReadonlySignal, Signal, signal, untracked } from 
 import { createDraft, finishDraft, freeze, immerable, isDraftable, type Patch } from "immer";
 import type { Draft } from "../immer";
 import { ContextOptions, getContext, getContextOwner, registerContextOwner } from "./context.js";
-import { reservedKeys, sigmaRefs, sigmaStateBrand, signalPrefix } from "./symbols.js";
+import { reservedKeys, sigmaStateBrand, signalPrefix } from "./symbols.js";
 import type { AnyFunction, AnyResource, AnySigmaState, AnyState, Cleanup } from "./types.js";
 
 export type SigmaTypeInternals = {
@@ -223,11 +223,7 @@ export function readActionStateValue(owner: ActionOwner, key: string, options: C
   const signal = getSignal(owner.instance, key);
   const committedValue = options.reactiveReads ? signal.value : signal.peek();
 
-  if (
-    options.draftOnRead &&
-    isDraftable(committedValue) &&
-    !sigmaRefs.has(committedValue as object)
-  ) {
+  if (options.draftOnRead && isDraftable(committedValue)) {
     return ensureOwnerDraft(owner)[key];
   }
 
@@ -419,7 +415,7 @@ function publishState(instance: SigmaInternals, finalized: FinalizedDraftResult)
   batch(() => {
     for (const key of instance.stateKeys) {
       const nextValue = finalized.newState[key];
-      if (isDraftable(nextValue) && !sigmaRefs.has(nextValue as object)) {
+      if (isDraftable(nextValue)) {
         freeze(nextValue);
       }
       const signal = getSignal(instance, key) as Signal<any>;
