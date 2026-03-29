@@ -1,3 +1,4 @@
+import { isSigmaState } from "./framework.js";
 import type { AnySigmaStateWithEvents } from "./internal/types.js";
 
 type TryGet<T, K extends PropertyKey, TCatch = never> = K extends keyof T ? T[K] : TCatch;
@@ -39,10 +40,14 @@ export type InferListener<TTarget extends EventTarget, TEvent extends string = s
 export function listen<TTarget extends EventTarget, TEvent extends InferEventType<TTarget>>(
   target: TTarget,
   name: TEvent,
-  listener: InferListener<TTarget, TEvent>,
+  fn: InferListener<TTarget, TEvent>,
 ) {
-  target.addEventListener(name, listener as EventListener);
+  const listener: EventListener = isSigmaState(target)
+    ? (event) => fn((event as CustomEvent).detail)
+    : (fn as EventListener);
+
+  target.addEventListener(name, listener);
   return () => {
-    target.removeEventListener(name, listener as EventListener);
+    target.removeEventListener(name, listener);
   };
 }

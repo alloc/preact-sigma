@@ -126,6 +126,53 @@ test("snapshot returns committed public state and computed getters stay out of e
   );
 });
 
+test("listen unwraps sigma-state event payloads and supports void events", () => {
+  type Todo = {
+    id: string;
+    title: string;
+  };
+
+  const TodoList = new SigmaType<{ todos: Todo[] }, { added: Todo; reset: void }>()
+    .defaultState({
+      todos: [],
+    })
+    .actions({
+      addTodo(title: string) {
+        const todo = {
+          id: String(this.todos.length + 1),
+          title,
+        };
+        this.todos.push(todo);
+        this.commit();
+        this.emit("added", todo);
+      },
+      reset() {
+        this.todos = [];
+        this.commit();
+        this.emit("reset");
+      },
+    });
+
+  const todoList = new TodoList();
+  const observed: string[] = [];
+
+  const stopAdded = listen(todoList, "added", (todo) => {
+    observed.push(`added:${todo.title}`);
+  });
+  const stopReset = listen(todoList, "reset", () => {
+    observed.push("reset");
+  });
+
+  todoList.addTodo("Ship v2");
+  todoList.reset();
+  stopAdded();
+  stopReset();
+  todoList.addTodo("Ignored");
+  todoList.reset();
+
+  assert.deepEqual(observed, ["added:Ship v2", "reset"]);
+});
+
 test("setup returns a single cleanup that owns nested resources", () => {
   const observedEvents: string[] = [];
   const abortController = new AbortController();
@@ -381,7 +428,9 @@ test("replaceState restores committed state and notifies observers", () => {
 
   assert.equal(counter.count, 0);
   assert.lengthOf(observed, 2);
-  assert.sameDeepMembers(observed[1].inversePatches, [{ op: "replace", path: ["count"], value: 1 }]);
+  assert.sameDeepMembers(observed[1].inversePatches, [
+    { op: "replace", path: ["count"], value: 1 },
+  ]);
   assert.sameDeepMembers(observed[1].patches, [{ op: "replace", path: ["count"], value: 0 }]);
 });
 
@@ -831,15 +880,16 @@ test("top-level custom class instances stay mutable by reference unless marked i
   const Store = new SigmaType<{
     mutableCache: MutableCache;
     draftableCache: DraftableCache;
-  }>().defaultState({
-    mutableCache: () => new MutableCache(),
-    draftableCache: () => new DraftableCache(),
-  })
-  .actions({
-    incrementDraftableCache() {
-      this.draftableCache.count += 1;
-    },
-  });
+  }>()
+    .defaultState({
+      mutableCache: () => new MutableCache(),
+      draftableCache: () => new DraftableCache(),
+    })
+    .actions({
+      incrementDraftableCache() {
+        this.draftableCache.count += 1;
+      },
+    });
 
   const store = new Store();
   const initialDraftableCache = store.draftableCache;
