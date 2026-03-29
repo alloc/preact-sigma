@@ -4,6 +4,19 @@
 
 You define a reusable state type once, then create instances wherever they make sense: inside components, in shared modules, or in plain TypeScript code. Each instance exposes readonly public state, tracked derived reads, imperative actions, and optional setup and event APIs.
 
+## Getting Started
+
+To add `preact-sigma` to your project:
+
+```bash
+npm install preact-sigma
+```
+
+If you use AI coding agents, this repo also includes agent-oriented guidance:
+
+- [llms.txt](./llms.txt) provides a compact overview of the API and recommended patterns.
+- Companion skills are available via `npx skills add alloc/preact-sigma`.
+
 ## What It Is
 
 At its core, `preact-sigma` lets you describe a stateful model as a constructor:
