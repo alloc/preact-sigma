@@ -121,10 +121,6 @@ export function initializeSigmaInstance(
   type: SigmaTypeInternals,
   initialState: AnyState | undefined,
 ) {
-  if (initialState && !isPlainObject(initialState)) {
-    throw new Error("[preact-sigma] Sigma state instances require a plain object initial state");
-  }
-
   const stateKeys = new Set(type.defaultStateKeys);
   if (initialState) {
     for (const key in initialState) {
