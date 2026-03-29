@@ -24,7 +24,8 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit --allowImportingTsExtensions",
     "fmt": "oxfmt",
-    "lint": "oxlint"
+    "lint": "oxlint",
+    "prepublishOnly": "pnpm build"
   },
   "dependencies": {
     "@preact/signals": "^2.8.2",
