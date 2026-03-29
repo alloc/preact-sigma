@@ -149,7 +149,7 @@ In Preact, the same constructor can be used with `useSigma(() => new TodoList(),
 - Let `new SigmaType<TState, TEvents>()` and the builder inputs drive inference. Avoid forcing extra type arguments onto builder methods.
 - Keep top-level state properties meaningful. Each top-level property gets its own signal, so shape state around the reads you want to track.
 - Use `computed(...)` for argument-free derived state, and use queries for reactive reads that need parameters.
-- Put writes in actions. If an async action needs to publish changes after `await`, call `this.commit()` at the points where those writes should become public.
+- Put writes in actions. A draft boundary is any point where sigma cannot keep reusing the current draft. `emit()`, `await`, and any action call other than a same-instance sync nested action call are draft boundaries, so call `this.commit()` before those boundaries when pending writes should become public.
 - Use `snapshot(instance)` and `replaceState(instance, snapshot)` for committed-state replay. They work on top-level state keys and stay outside action semantics.
+- Use `immerable` on custom classes only when they should participate in Immer drafting. `setAutoFreeze(false)` disables sigma's runtime deep-freezing when you need published state to stay unfrozen.
 - Use `setup(...)` for owned side effects, and always return cleanup resources for anything the instance starts.
-- Reach for `ref(...)` only when a top-level object, array, `Map`, or `Set` should intentionally stay mutable by reference.

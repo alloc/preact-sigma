@@ -8,15 +8,41 @@
 - `computed`: A tracked getter declared with `.computed({ ... })`.
 - `query`: A tracked method declared with `.queries({ ... })` or created with `query(fn)`.
 - `action`: A method declared with `.actions({ ... })` that reads and writes through one Immer draft for one synchronous call.
+- `draft boundary`: Any point where sigma cannot keep reusing the current draft.
 - `setup handler`: A function declared with `.setup(fn)` that returns an array of cleanup resources.
 - `cleanup resource`: A cleanup function, an `AbortController`, or an object with `[Symbol.dispose]()`.
 - `signal access`: Reading the underlying `ReadonlySignal` for a state property or computed through `instance.get(key)`.
 
-## Purpose
+## Navigation
 
-`preact-sigma` is a class-builder state API built on top of `@preact/signals` and `immer`.
+- For state shape, inference, and instance shape, read `Start Here`, `Inference`, `SigmaType`, and `Public Instance Shape`.
+- For mutation semantics, read `Critical Rules`, `actions`, `immerable`, and `setAutoFreeze`.
+- For side effects and events, read `setup`, `Events`, `listen`, `useListener`, and `useSigma`.
+- For committed-state utilities, read `observe`, `snapshot`, and `replaceState`.
 
-It gives each top-level state property its own signal, exposes readonly public state, supports tracked computed getters and queries, batches writes through actions, and provides explicit setup/cleanup.
+## Start Here
+
+- `preact-sigma` is a class-builder state API built on top of `@preact/signals` and `immer`.
+- Use `new SigmaType<TState, TEvents>()` to build reusable constructors for sigma states.
+- Each top-level state property gets its own signal and readonly public property.
+- Use `computed` for argument-free derived state.
+- Use `.queries({ ... })` for reactive reads that accept parameters.
+- Put writes in `.actions({ ... })`.
+- `setup` is explicit and returns cleanup resources.
+- `observe` sees committed state changes after successful publishes.
+- `snapshot` and `replaceState` operate on committed top-level state outside action semantics.
+
+## Critical Rules
+
+- Prefer explicit type arguments only on `new SigmaType<TState, TEvents>()`. Let builder methods infer from their inputs.
+- `emit()` is a draft boundary.
+- Any action call is a draft boundary unless it is a same-instance sync nested action call.
+- That means cross-instance action calls and all async action calls are draft boundaries.
+- `await` inside an async action is also a draft boundary.
+- `this.commit()` is only needed when the current action has unpublished draft changes and is about to cross a draft boundary.
+- A synchronous action does not need `this.commit()` when it finishes without crossing a draft boundary.
+- Successful publishes deep-freeze draftable public state while auto-freezing is enabled.
+- Only values that Immer considers draftable participate in that freeze path. Custom class instances without a true `[immerable]` property stay outside it.
 
 ## Runtime Exports
 
@@ -52,15 +78,13 @@ import {
 - `AnySigmaStateWithEvents`: Describes a sigma-state instance with a typed event map.
 - `AnyState`: Describes the top-level state object for a sigma type.
 - `InferEventType`: Infers the supported event names for a target used with `listen(...)` or `useListener(...)`.
-- `InferSetupArgs`: Infers the `setup(...)` argument list for a sigma-state instance.
 - `InferListener`: Infers the listener signature for a target and event name.
+- `InferSetupArgs`: Infers the `setup(...)` argument list for a sigma-state instance.
 - `SigmaObserveChange`: Describes the object received by `.observe(...)` listeners.
 - `SigmaObserveOptions`: Describes the options object accepted by `.observe(...)`.
 - `SigmaState`: Describes the public instance shape produced by a configured sigma type.
 
-## Declaration Pattern
-
-Use the incremental builder:
+## Builder Example
 
 ```typescript
 import { SigmaType } from "preact-sigma";
@@ -107,6 +131,7 @@ const TodoList = new SigmaType<TodoListState, TodoListEvents>()
       };
       this.todos.push(todo);
       this.draft = "";
+      this.commit();
       this.emit("added", todo);
     },
   });
@@ -120,23 +145,11 @@ const todoList = new TodoList();
 - `defaultState` comes from `.defaultState(...)`, where each property may be either a value or a zero-argument initializer that returns the value.
 - Public computed names and return types come from `.computed(...)`.
 - Public query names, parameter types, and return types come from `.queries(...)`.
-- `observe(change)` types come from `.observe(...)`, and `patches`/`inversePatches` are present when that call uses `{ patches: true }`.
+- `observe(change)` types come from `.observe(...)`, and `patches` and `inversePatches` are present when that call uses `{ patches: true }`.
 - Public action names, parameter types, and return types come from `.actions(...)`.
 - `setup(...args)` argument types come from the first `.setup(...)` call and later setup calls reuse that same argument list.
 - `get(key)` signal types come from `TState` and from the return types declared by `.computed(...)`.
 - Do not pass explicit type arguments to the builder methods. Let inference come from each method input.
-
-## Public Instance Shape
-
-A sigma-state instance exposes:
-
-- one readonly property for every state property
-- one tracked getter for every computed
-- one method for every query
-- one method for every action
-- `get(key): ReadonlySignal<...>` for state-property and computed keys
-- `setup(...args): () => void` when the builder has at least one setup handler
-- `on(name, listener): () => void`
 
 ## `SigmaType`
 
@@ -144,22 +157,36 @@ A sigma-state instance exposes:
 
 Behavior:
 
-- `.defaultState(...)`, `.setup(...)`, `.computed(...)`, `.queries(...)`, `.observe(...)`, and `.actions(...)` all mutate the same builder and return it
-- those builder methods are additive and may be called in any order
-- builder method typing only exposes state helpers that existed when that builder call happened
-- runtime contexts use the full accumulated builder, including definitions added by later builder calls
-- `defaultState` is optional and must be a plain object when provided
-- function-valued `defaultState` properties act as per-instance initializers, and their return values become the state values for that instance
-- constructor input must be a plain object when provided
-- constructor input shallowly overrides `defaultState`
-- if every required state property is covered by `defaultState`, constructor input is optional
-- duplicate names across state properties, computeds, queries, and actions are rejected at runtime
-- reserved public names are `get`, `setup`, `on`, and `emit`
+- `.defaultState(...)`, `.setup(...)`, `.computed(...)`, `.queries(...)`, `.observe(...)`, and `.actions(...)` all mutate the same builder and return it.
+- Those builder methods are additive and may be called in any order.
+- Builder method typing only exposes state helpers that existed when that builder call happened.
+- Runtime contexts use the full accumulated builder, including definitions added by later builder calls.
+- `defaultState` is optional and must be a plain object when provided.
+- Function-valued `defaultState` properties act as per-instance initializers, and their return values become the state values for that instance.
+- Constructor input must be a plain object when provided.
+- Constructor input shallowly overrides `defaultState`.
+- If every required state property is covered by `defaultState`, constructor input is optional.
+- Duplicate names across state properties, computeds, queries, and actions are rejected at runtime.
+- Reserved public names are `get`, `setup`, `on`, and `emit`.
+
+## Public Instance Shape
+
+A sigma-state instance exposes:
+
+- one readonly enumerable own property for every state property
+- one tracked non-enumerable getter for every computed
+- one method for every query
+- one method for every action
+- `get(key): ReadonlySignal<...>` for state-property and computed keys
+- `setup(...args): () => void` when the builder has at least one setup handler
+- `on(name, listener): () => void`
+- `Object.keys(instance)` includes only top-level state properties
 
 ## Reactivity Model
 
 - each top-level state property is backed by its own Preact signal
 - public state reads are reactive
+- signal access is reactive, so reading `.value` tracks like any other Preact signal read
 - computed getters are reactive and lazily memoized
 - queries are reactive at the call site, including queries with arguments
 - query calls are not memoized across invocations; each call uses a fresh `computed(...)` wrapper and does not retain that signal
@@ -172,7 +199,6 @@ Behavior:
 
 - state-property keys return that property's signal
 - computed keys return that computed getter's signal
-- signal access is reactive, so reading `.value` tracks like any other Preact signal read
 
 ## `computed`
 
@@ -209,19 +235,23 @@ Actions are added with `.actions({ ... })`.
 Behavior:
 
 - actions create drafts lazily when reads or writes need draft-backed mutation semantics
-- declared async actions publish their initial synchronous draft on return
-- after an async action resumes from `await`, top-level reads of draftable state and state writes may open a hidden draft for that async invocation
 - actions may call other actions, queries, and computeds
 - same-instance sync nested action calls reuse the current draft
+- any other action call starts a different invocation and is a draft boundary
+- `emit()` is a draft boundary
+- `await` inside an async action is a draft boundary
 - `this.commit()` publishes the current draft immediately
-- successful publishes deep-freeze the resulting public state and write it back to per-property signals while auto-freezing is enabled
-- top-level custom class instances stay mutable by reference unless the class opts into drafting with `[immerable] = true`
-- actions can emit typed events with `this.emit(...)`
-- `emit()` and action calls that would start a different invocation are boundaries
+- `this.commit()` is only needed when the current action has unpublished draft changes and is about to cross a draft boundary
+- a synchronous action does not need `this.commit()` when it finishes without crossing a draft boundary
+- declared async actions publish their initial synchronous draft on return
+- after an async action resumes from `await`, top-level reads of draftable state and state writes may open a hidden draft for that async invocation
 - non-async actions must stay synchronous; if one returns a promise, sigma throws
 - if an async action reaches `await` or `return` with unpublished changes, the action promise rejects when it settles
 - if an action crosses a boundary while it owns unpublished changes, sigma throws until `this.commit()` publishes them
 - if a different invocation crosses a boundary while unpublished changes still exist, sigma warns and discards them before continuing
+- successful publishes deep-freeze draftable public state and write it back to per-property signals while auto-freezing is enabled
+- custom classes participate in Immer drafting only when the class opts into drafting with `[immerable] = true`
+- actions can emit typed events with `this.emit(...)`
 - action wrappers are shared across instances
 - action typing only exposes computeds, queries, and actions that were already present when its `.actions(...)` call happened
 
@@ -289,8 +319,10 @@ Behavior:
 
 Behavior:
 
-- unmarked custom class instances stay mutable by reference when stored as top-level sigma state
-- marking a class with `[immerable] = true` makes that class participate in Immer drafting and freezing
+- unmarked custom class instances stay outside Immer drafting
+- marking a class with `[immerable] = true` makes that class participate in Immer drafting
+- sigma only freezes published values that Immer considers draftable
+- custom class instances without a true `[immerable]` property stay outside that freeze path
 - plain objects, arrays, `Map`, and `Set` already participate in normal Immer drafting without extra markers
 
 ## `query(fn)`
@@ -307,20 +339,6 @@ Behavior:
 - use `query(fn)` when a tracked helper is large, rarely needed, or better kept local to a consumer module for tree-shaking
 - query helpers do not need to live on the sigma state or in the same module as it
 
-## `batch`
-
-`batch` is re-exported from `@preact/signals`.
-
-## `effect`
-
-`effect` is re-exported from `@preact/signals`.
-
-## `freeze`
-
-`freeze` is re-exported from `immer`.
-
-A frozen object cannot be mutated through Immer drafts, including inside sigma actions.
-
 ## `setAutoFreeze`
 
 `setAutoFreeze(autoFreeze)` controls whether sigma deep-freezes published public state at runtime.
@@ -328,8 +346,8 @@ A frozen object cannot be mutated through Immer drafts, including inside sigma a
 Behavior:
 
 - auto-freezing starts enabled
-- `setAutoFreeze(false)` leaves later published public state unfrozen
-- `setAutoFreeze(true)` restores deep freezing for later publishes
+- `setAutoFreeze(false)` leaves later published draftable public state unfrozen
+- `setAutoFreeze(true)` restores deep freezing for later published draftable state
 - the setting is shared across sigma state instances
 
 ## `snapshot`
@@ -357,9 +375,10 @@ Behavior:
 - it throws if an action still owns unpublished changes
 - the snapshot parameter type is inferred from the instance's sigma-state definition
 
-## `untracked`
+## Passthrough Exports
 
-`untracked` is re-exported from `@preact/signals`.
+- `action`, `batch`, `computed`, `effect`, and `untracked` are re-exported from `@preact/signals`.
+- `freeze` is re-exported from `immer`. A frozen object cannot be mutated through Immer drafts, including inside sigma actions.
 
 ## `useSigma`
 
@@ -376,6 +395,12 @@ Behavior:
 ## `listen`
 
 `listen(target, name, listener)` adds an event listener and returns a cleanup function.
+
+Behavior:
+
+- it subscribes with `addEventListener(...)` and returns a cleanup function that removes that listener
+- for sigma-state targets, the listener receives the typed payload directly
+- for DOM targets, the listener receives the typed DOM event object
 
 ## `useListener`
 
