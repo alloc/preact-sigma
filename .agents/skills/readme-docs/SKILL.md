@@ -1,6 +1,8 @@
 ---
 name: readme-docs
 description: Refresh README-style documentation, llms.txt, and best-practices docs from the current API declaration file or primary public API source.
+metadata:
+  internal: true
 ---
 
 # README Docs

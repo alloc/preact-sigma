@@ -1,6 +1,8 @@
 ---
 name: emil-design-eng
 description: This skill encodes Emil Kowalski's philosophy on UI polish, component design, animation decisions, and the invisible details that make software feel great.
+metadata:
+  internal: true
 ---
 
 # Design Engineering
@@ -381,10 +383,12 @@ Unlike `width`/`height`, `scale()` also scales an element's children. When scali
 
 @keyframes orbit {
   from {
-    transform: translate(-50%, -50%) rotateY(0deg) translateZ(72px) rotateY(360deg);
+    transform: translate(-50%, -50%) rotateY(0deg) translateZ(72px)
+      rotateY(360deg);
   }
   to {
-    transform: translate(-50%, -50%) rotateY(360deg) translateZ(72px) rotateY(0deg);
+    transform: translate(-50%, -50%) rotateY(360deg) translateZ(72px)
+      rotateY(0deg);
   }
 }
 ```
@@ -518,11 +522,14 @@ CSS animations run off the main thread. When the browser is busy loading a new p
 The Web Animations API gives you JavaScript control with CSS performance. Hardware-accelerated, interruptible, and no library needed.
 
 ```js
-element.animate([{ clipPath: "inset(0 0 100% 0)" }, { clipPath: "inset(0 0 0 0)" }], {
-  duration: 1000,
-  fill: "forwards",
-  easing: "cubic-bezier(0.77, 0, 0.175, 1)",
-});
+element.animate(
+  [{ clipPath: "inset(0 0 100% 0)" }, { clipPath: "inset(0 0 0 0)" }],
+  {
+    duration: 1000,
+    fill: "forwards",
+    easing: "cubic-bezier(0.77, 0, 0.175, 1)",
+  },
+);
 ```
 
 ## Accessibility
