@@ -65,6 +65,44 @@ test("useSigmaState initializes once, runs setup, and cleans up on unmount", asy
   assert.equal(cleanupCount, 1);
 });
 
+test("useSigma reruns setup when setupArgs change and cleans up the previous run", async () => {
+  const container = createContainer();
+  const events: string[] = [];
+  let state!: {
+    count: number;
+  };
+
+  const Counter = new SigmaType<{ count: number }>()
+    .defaultState({
+      count: 0,
+    })
+    .setup(function (label: string) {
+      events.push(`setup:${label}`);
+      return [
+        () => {
+          events.push(`cleanup:${label}`);
+        },
+      ];
+    });
+
+  const Probe: FunctionComponent<{ label: string }> = ({ label }) => {
+    state = useSigma(() => new Counter(), [label]);
+    return null;
+  };
+
+  await act(() => render(h(Probe, { label: "a" }), container));
+  const firstState = state;
+
+  await act(() => render(h(Probe, { label: "b" }), container));
+
+  assert.equal(state, firstState);
+  assert.deepEqual(events, ["setup:a", "cleanup:a", "setup:b"]);
+
+  await act(() => render(null, container));
+
+  assert.deepEqual(events, ["setup:a", "cleanup:a", "setup:b", "cleanup:b"]);
+});
+
 test("useListener keeps the latest callback", async () => {
   const container = createContainer();
   const observed: string[] = [];

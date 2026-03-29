@@ -250,6 +250,47 @@ test("setup handlers must return arrays", () => {
   }, /must return an array/);
 });
 
+test("setup cleanup aggregates failures after running every cleanup resource", () => {
+  const events: string[] = [];
+  const firstError = new Error("first");
+  const lastError = new Error("last");
+
+  const Store = new SigmaType<{ count: number }>()
+    .defaultState({
+      count: 0,
+    })
+    .setup(function () {
+      return [
+        () => {
+          events.push("cleanup:first");
+          throw firstError;
+        },
+        () => {
+          events.push("cleanup:middle");
+        },
+        () => {
+          events.push("cleanup:last");
+          throw lastError;
+        },
+      ];
+    });
+
+  const store = new Store();
+  const cleanup = store.setup();
+
+  let thrown: unknown;
+  try {
+    cleanup();
+  } catch (error) {
+    thrown = error;
+  }
+
+  assert.instanceOf(thrown, AggregateError);
+  assert.equal((thrown as AggregateError).message, "Failed to dispose one or more sigma resources");
+  assert.deepEqual((thrown as AggregateError).errors, [lastError, firstError]);
+  assert.deepEqual(events, ["cleanup:last", "cleanup:middle", "cleanup:first"]);
+});
+
 test("actions reuse one draft and can call queries, computeds, and other actions", () => {
   const Counter = new SigmaType<{ count: number }>()
     .defaultState({
@@ -460,6 +501,36 @@ test("replaceState validates snapshot shape", () => {
       page: 1,
     } as unknown as { draft: string; page: number });
   }, /Extra: extra/);
+});
+
+test("replaceState is a no-op for the current committed snapshot", () => {
+  const observed: number[] = [];
+
+  const Counter = new SigmaType<{ count: number }>()
+    .defaultState({
+      count: 0,
+    })
+    .observe((change) => {
+      observed.push(change.newState.count);
+    })
+    .actions({
+      increment() {
+        this.count += 1;
+      },
+    });
+
+  const counter = new Counter();
+  const initial = snapshot(counter);
+
+  replaceState(counter, initial);
+  assert.deepEqual(observed, []);
+
+  counter.increment();
+  const changed = snapshot(counter);
+  replaceState(counter, changed);
+
+  assert.equal(counter.count, 1);
+  assert.deepEqual(observed, [1]);
 });
 
 test("replaceState throws while an async action has unpublished changes", async () => {
