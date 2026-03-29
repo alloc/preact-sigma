@@ -92,26 +92,6 @@ export function isPlainObject(value: unknown): value is Record<string, unknown> 
   return prototype === Object.prototype || prototype === null;
 }
 
-export function createCleanup(resources: readonly AnyResource[]): Cleanup {
-  if (!resources.length) {
-    return () => {};
-  }
-  return () => {
-    let errors: unknown[] | undefined;
-    for (let index = resources.length - 1; index >= 0; index -= 1) {
-      try {
-        disposeCleanupResource(resources[index]);
-      } catch (error) {
-        errors ||= [];
-        errors.push(error);
-      }
-    }
-    if (errors) {
-      throw new AggregateError(errors, "Failed to dispose one or more sigma resources");
-    }
-  };
-}
-
 export function getSignal(instance: SigmaInternals, key: string) {
   return (instance.publicInstance as any)[signalPrefix + key] as ReadonlySignal<any>;
 }
@@ -597,16 +577,42 @@ export class Sigma extends EventTarget {
     instance.currentSetupCleanup?.();
     instance.currentSetupCleanup = undefined;
 
-    const cleanup = createCleanup(
-      instance.type.setupFunctions.flatMap((setup) => {
-        const result = setup.apply(getContext(instance, "setup"), args);
-        if (!Array.isArray(result)) {
-          throw new Error("[preact-sigma] Sigma setup handlers must return an array");
+    const resources = instance.type.setupFunctions.flatMap((setup) => {
+      const result = setup.apply(getContext(instance, "setup"), args);
+      if (!Array.isArray(result)) {
+        throw new Error("[preact-sigma] Sigma setup handlers must return an array");
+      }
+      return result;
+    });
+
+    let cleanup: Cleanup;
+    if (resources.length) {
+      let cleaned = false;
+      cleanup = () => {
+        if (instance.currentSetupCleanup === cleanup) {
+          instance.currentSetupCleanup = undefined;
         }
-        return result;
-      }),
-    );
-    instance.currentSetupCleanup = cleanup;
+        if (cleaned) return;
+        cleaned = true;
+
+        let errors: unknown[] | undefined;
+        for (let index = resources.length - 1; index >= 0; index -= 1) {
+          try {
+            disposeCleanupResource(resources[index]);
+          } catch (error) {
+            errors ||= [];
+            errors.push(error);
+          }
+        }
+        if (errors) {
+          throw new AggregateError(errors, "Failed to dispose one or more sigma resources");
+        }
+      };
+      instance.currentSetupCleanup = cleanup;
+    } else {
+      cleanup = () => {};
+    }
+
     return cleanup;
   }
 
