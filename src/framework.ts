@@ -7,7 +7,7 @@ import {
   Sigma,
   type SigmaTypeInternals,
 } from "./internal/runtime.js";
-import { sigmaStateBrand, signalPrefix } from "./internal/symbols.js";
+import { sigmaRefBrand, sigmaStateBrand, signalPrefix } from "./internal/symbols.js";
 import type {
   ActionContext,
   AnyDefaultState,
@@ -49,6 +49,14 @@ export type {
 /** Checks whether a value is a sigma-state instance. */
 export function isSigmaState(value: unknown): value is AnySigmaState {
   return Boolean(value && typeof value === "object" && (value as AnySigmaState)[sigmaStateBrand]);
+}
+
+/**
+ * Returns `value` unchanged and marks its type so sigma's Draft and Immutable
+ * helpers keep it by reference instead of recursively immerizing it.
+ */
+export function ref<T extends object>(value: T) {
+  return value as T & { [sigmaRefBrand]?: true };
 }
 
 /** Creates a standalone tracked query function with the same signature as `fn`. */

@@ -5,6 +5,7 @@ import {
   action,
   immerable,
   query,
+  ref,
   replaceState,
   setAutoFreeze,
   SigmaType,
@@ -143,6 +144,16 @@ test("sigma infers public state from the two-step declaration", () => {
     count = 1;
   }
 
+  const createRefCache = () =>
+    ref({
+      count: 1,
+      nested: {
+        label: "cache",
+      },
+    });
+
+  type RefCache = ReturnType<typeof createRefCache>;
+
   assertType<void>(setAutoFreeze(false));
   assertType<MutableCache>(new MutableCache());
   assertType<DraftableCache>(new DraftableCache());
@@ -165,6 +176,17 @@ test("sigma infers public state from the two-step declaration", () => {
 
   assertType<number>(generated.id);
   assertType<readonly string[]>(generated.tags);
+
+  const RefStore = new SigmaType<{
+    cache: RefCache;
+  }>().defaultState({
+    cache: createRefCache,
+  });
+
+  const refStore = new RefStore();
+
+  refStore.cache.count += 1;
+  refStore.cache.nested.label = "next";
 
   new SigmaType<{ count: number }>().defaultState({
     // @ts-expect-error initializer result must match the state property type

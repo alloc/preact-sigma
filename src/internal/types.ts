@@ -2,7 +2,7 @@ import type { ReadonlySignal } from "@preact/signals";
 import type { Patch } from "immer";
 import type { SigmaType } from "../framework.js";
 import type { Draft, Immutable } from "../immer.js";
-import { sigmaEventsBrand, sigmaStateBrand } from "./symbols.js";
+import { sigmaEventsBrand, sigmaRefBrand, sigmaStateBrand } from "./symbols.js";
 
 export type AnyFunction = (...args: any[]) => any;
 
@@ -12,6 +12,11 @@ type DefaultStateValue<TValue> = TValue | DefaultStateInitializer<TValue>;
 type Disposable = {
   [Symbol.dispose](): void;
 };
+
+/** A type brand added by `ref(...)`. */
+export interface SigmaRef {
+  [sigmaRefBrand]?: true;
+}
 
 /** The event map shape used by sigma types. */
 export type AnyEvents = Record<string, object | void>;

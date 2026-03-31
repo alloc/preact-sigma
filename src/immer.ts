@@ -1,17 +1,12 @@
 // Copied from: node_modules/.pnpm/immer@11.1.4/node_modules/immer/dist/immer.d.ts
 // Adapted to skip sigma-state instances.
+import { sigmaRefBrand } from "./internal/symbols.js";
 import type { AnySigmaState } from "./internal/types.js";
 
 type PrimitiveType = number | string | boolean;
 
 /** Object types that should never be mapped */
-type AtomicObject =
-  | Function
-  | Promise<any>
-  | Date
-  | RegExp
-  | EventTarget
-  | AnySigmaState;
+type AtomicObject = Function | Promise<any> | Date | RegExp | EventTarget | AnySigmaState;
 
 /**
  * If the lib "ES2015.Collection" is not included in tsconfig.json,
@@ -32,6 +27,12 @@ type IfAvailable<T, Fallback = void> = true | false extends (T extends never ? t
  */
 type WeakReferences = IfAvailable<WeakMap<any, any>> | IfAvailable<WeakSet<any>>;
 
+type HasSigmaRefBrand<T> = [T] extends [object]
+  ? typeof sigmaRefBrand extends keyof T
+    ? true
+    : false
+  : false;
+
 type WritableDraft<T> = T extends any[]
   ? number extends T["length"]
     ? Draft<T[number]>[]
@@ -51,15 +52,17 @@ export type Draft<T> = T extends PrimitiveType
   ? T
   : T extends AtomicObject
     ? T
-    : T extends ReadonlyMap<infer K, infer V>
-      ? Map<Draft<K>, Draft<V>>
-      : T extends ReadonlySet<infer V>
-        ? Set<Draft<V>>
-        : T extends WeakReferences
-          ? T
-          : T extends object
-            ? WritableDraft<T>
-            : T;
+    : HasSigmaRefBrand<T> extends true
+      ? T
+      : T extends ReadonlyMap<infer K, infer V>
+        ? Map<Draft<K>, Draft<V>>
+        : T extends ReadonlySet<infer V>
+          ? Set<Draft<V>>
+          : T extends WeakReferences
+            ? T
+            : T extends object
+              ? WritableDraft<T>
+              : T;
 
 /**
  * Convert a mutable type into a readonly type.
@@ -70,14 +73,16 @@ export type Immutable<T> = T extends PrimitiveType
   ? T
   : T extends AtomicObject
     ? T
-    : T extends ReadonlyMap<infer K, infer V>
-      ? ReadonlyMap<Immutable<K>, Immutable<V>>
-      : T extends ReadonlySet<infer V>
-        ? ReadonlySet<Immutable<V>>
-        : T extends WeakReferences
-          ? T
-          : T extends object
-            ? {
-                readonly [K in keyof T]: Immutable<T[K]>;
-              }
-            : T;
+    : HasSigmaRefBrand<T> extends true
+      ? T
+      : T extends ReadonlyMap<infer K, infer V>
+        ? ReadonlyMap<Immutable<K>, Immutable<V>>
+        : T extends ReadonlySet<infer V>
+          ? ReadonlySet<Immutable<V>>
+          : T extends WeakReferences
+            ? T
+            : T extends object
+              ? {
+                  readonly [K in keyof T]: Immutable<T[K]>;
+                }
+              : T;
