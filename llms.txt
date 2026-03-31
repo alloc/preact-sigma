@@ -7,7 +7,6 @@
 - `state property`: A top-level property from `TState`, such as `draft` in `{ draft: string }`.
 - `computed`: A tracked getter declared with `.computed({ ... })`.
 - `query`: A tracked method declared with `.queries({ ... })` or created with `query(fn)`.
-- `SigmaRef<T>`: A type brand that keeps a value by reference in sigma's `Draft` and `Immutable` types without changing runtime behavior.
 - `action`: A method declared with `.actions({ ... })` that reads and writes through one Immer draft for one synchronous call.
 - `draft boundary`: Any point where sigma cannot keep reusing the current draft.
 - `setup handler`: A function declared with `.setup(fn)` that returns an array of cleanup resources.
@@ -18,7 +17,7 @@
 
 - For state shape, inference, and instance shape, read `Start Here`, `Inference`, `SigmaType`, and `Public Instance Shape`.
 - For mutation semantics, read `Critical Rules`, `actions`, `immerable`, and `setAutoFreeze`.
-- For type-level by-reference values, read `SigmaRef<T>`.
+- For type-level by-reference values, see `SigmaRef<T>`.
 - For side effects and events, read `setup`, `Events`, `listen`, `useListener`, and `useSigma`.
 - For committed-state utilities, read `observe`, `snapshot`, and `replaceState`.
 
