@@ -11,6 +11,8 @@
   - Prefer namespace imports for runtime helper modules when that avoids local aliasing, for example `import * as moduleName` instead of renamed imports.
 - Performance guidance
   - Avoid speculative performance memoization. Prefer plain derivation until benchmarks justify caching, and if one cached derivation is kept, make the tradeoff explicit.
+  - Prefer simple parameters over one-off options objects on hot internal paths when a single boolean or scalar is enough.
+  - Avoid cloning argument arrays on internal hot paths when an existing array-like value can be passed through directly.
 - Testing guidance
   - Write runtime tests only for supported runtime contract behavior, plus intentional runtime guards for invalid inputs.
   - Use type tests for behavior that is enforced by the type system in supported usage.
