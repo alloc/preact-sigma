@@ -1,0 +1,4 @@
+interface:
+  display_name: "Preact Sigma"
+  short_description: "Build and review preact-sigma models"
+  default_prompt: "Use $preact-sigma to build or review a preact-sigma state model, including actions, queries, setup, and events."

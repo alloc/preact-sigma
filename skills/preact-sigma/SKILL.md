@@ -1,38 +1,43 @@
 ---
 name: preact-sigma
-description: Expert instructions and guidelines for working with the preact-sigma library.
+description: Build, refactor, and review preact-sigma state models. Use when code imports `preact-sigma` or needs guidance on `SigmaType`, `useSigma`, typed state, `defaultState` initializers, computeds, queries, actions, observe/setup handlers, events, signal access, snapshots, listeners, or Preact integration.
 ---
 
 # preact-sigma
 
-Expert instructions and guidelines for developing with `preact-sigma`, a class-builder state API built on top of `@preact/signals` and `immer`.
+Treat `preact-sigma` as a typed state-model builder built on top of `@preact/signals` and `immer`.
 
-## When to use
+## Core Workflow
 
-Use this skill when developing, refactoring, or reviewing code that leverages `preact-sigma` for state management, particularly when defining or interacting with `SigmaType` instances, computed signals, actions, and queries.
+1. Start from `new SigmaType<TState, TEvents>()` and let later builder methods infer from their inputs.
+2. Model reactive reads at the top level. Each top-level state property gets its own signal and readonly public property.
+3. Choose APIs by role:
+   - Use `.computed({ ... })` for tracked, argument-free getters.
+   - Use `.queries({ ... })` for tracked reads with arguments.
+   - Use `.actions({ ... })` for writes and typed event emission.
+   - Use `.observe(...)` for committed-state observation.
+   - Use `.setup(...)` for owned side effects and cleanup.
+4. Reach for `instance.get(key)` when code needs the underlying `ReadonlySignal`.
+5. Use `snapshot(instance)` and `replaceState(instance, snapshot)` only for committed top-level state flows such as replay or undo-like replacement.
+6. Use `listen(...)`, `useListener(...)`, and `useSigma(...)` for sigma-state or DOM integration instead of ad hoc wiring.
 
-## Instructions
+## Critical Rules
 
-1. **Understand Core Concepts:**
-   - **sigma type:** The builder returned by `new SigmaType<...>()`. It is also the constructor for sigma-state instances after configuration.
-   - **sigma state:** An instance created from a configured sigma type.
-   - **computed:** Argument-free derived state declared with `.computed({ ... })`.
-   - **query:** A tracked method declared with `.queries({ ... })` or created with `query(fn)`.
-   - **action:** A method declared with `.actions({ ... })` that reads and writes through one Immer draft for one synchronous call.
+- Prefer explicit type arguments only on `new SigmaType<TState, TEvents>()`.
+- Treat function-valued `defaultState` properties as per-instance initializers.
+- Treat builder methods as additive. They mutate the same builder and may be called in any order.
+- Remember that builder method typing only sees helpers that existed when that call happened, even though runtime contexts see the full accumulated builder.
+- Treat `emit()`, `await`, and any action call other than a same-instance synchronous nested action call as draft boundaries.
+- Call `this.commit()` only when pending draft changes must survive an upcoming boundary.
+- Keep non-async actions synchronous. If a non-async action returns a promise, sigma throws.
+- Run setup explicitly. Use `this.act(function () { ... })` inside setup when setup-owned work needs normal action semantics.
+- Return cleanup arrays from setup handlers. Supported resources include cleanup functions, `AbortController`, `dispose()`, and `[Symbol.dispose]()`.
+- Opt into observer patches with `{ patches: true }` only after the app has called Immer's `enablePatches()`.
 
-2. **Follow Type Inference and Architectural Rules:**
-   - Prefer explicit type arguments only on `new SigmaType<TState, TEvents>()`. Let builder methods infer from their inputs (do not pass explicit types to `.defaultState(...)`, `.actions(...)`, etc.).
-   - The `SigmaType` builder is additive. Builder methods mutate the same builder and return it.
+## Navigation
 
-3. **Respect Draft Boundaries in Actions:**
-   - `emit()` is a draft boundary.
-   - Any action call is a draft boundary unless it is a same-instance sync nested action call. (Cross-instance or async calls are draft boundaries).
-   - `await` inside an async action is a draft boundary.
-   - Call `this.commit()` _only_ when the current action has unpublished draft changes and is about to cross a draft boundary. A synchronous action that doesn't cross a boundary doesn't need it.
-   - Successful publishes deep-freeze draftable public state (if auto-freezing is enabled). Non-plain objects need `[immerable] = true` to participate.
-
-4. **Refer to Extended API Details:**
-   - For full details on API exports, instance shape, events, Preact hooks, advanced utilities, and advanced action rules, see the extended reference: [api-details.md](./api-details.md).
+- Read [references/api-details.md](./references/api-details.md) for the full exported surface.
+- Jump there for constructor and `defaultState` behavior, public instance shape, `observe(...)`, `setup(...)`, hooks/listeners, and advanced utilities.
 
 ## Example Pattern
 
@@ -84,6 +89,9 @@ const TodoList = new SigmaType<TodoListState, TodoListEvents>()
       this.commit(); // Needed if emit() is called, as emit() is a draft boundary
       this.emit("added", todo);
     },
+  })
+  .setup(function () {
+    return [];
   });
 
 const todoList = new TodoList();
