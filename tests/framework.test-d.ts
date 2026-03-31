@@ -198,6 +198,22 @@ test("sigma infers public state from the two-step declaration", () => {
   });
 
   new SigmaType<{ count: number }>()
+    .setup(function () {
+      return [
+        {
+          dispose() {},
+        },
+      ];
+    })
+    .setup(function () {
+      return [
+        {
+          [Symbol.dispose]() {},
+        },
+      ];
+    });
+
+  new SigmaType<{ count: number }>()
     // @ts-expect-error setup handlers must return arrays of cleanup resources
     .setup(function () {
       return () => {};

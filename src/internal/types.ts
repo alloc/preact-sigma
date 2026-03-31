@@ -12,6 +12,9 @@ type DefaultStateValue<TValue> = TValue | DefaultStateInitializer<TValue>;
 type Disposable = {
   [Symbol.dispose](): void;
 };
+type DisposableLike = {
+  dispose(): void;
+};
 
 interface SigmaRefBrand {
   [sigmaRefBrand]?: true;
@@ -30,8 +33,8 @@ export type AnyDefaultState<TState extends AnyState> = {
   [K in keyof TState]?: DefaultStateValue<TState[K]>;
 };
 
-/** A cleanup resource supported by `.setup(...)`. */
-export type AnyResource = Cleanup | Disposable | AbortController;
+/** A cleanup resource supported by `.setup(...)`, including function, `dispose()`, and `Symbol.dispose` cleanup. */
+export type AnyResource = Cleanup | Disposable | DisposableLike | AbortController;
 
 export type ComputedValues<TComputeds extends object | undefined> = [undefined] extends [TComputeds]
   ? never

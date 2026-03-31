@@ -157,6 +157,8 @@ cleanup();
 
 In Preact, the same constructor can be used with `useSigma(() => new TodoList(), ["todos-demo"])` so the component owns one instance and `setup(...)` cleanup runs automatically. Use `useListener(...)` when you want component-scoped event subscriptions with automatic teardown.
 
+Cleanup resources can be returned as functions, `AbortController`, objects with `dispose()`, or objects with `Symbol.dispose`.
+
 ## Best Practices
 
 - Let `new SigmaType<TState, TEvents>()` and the builder inputs drive inference. Avoid forcing extra type arguments onto builder methods.

@@ -32,7 +32,7 @@ import {
 
 - `AnyDefaultState`: Describes the object accepted by `.defaultState(...)`.
 - `AnyEvents`: Describes an event map from event names to payload objects or `void`.
-- `AnyResource`: Describes a supported setup cleanup resource.
+- `AnyResource`: Describes a supported setup cleanup resource, including cleanup functions, `AbortController`, objects with `dispose()`, and objects with `Symbol.dispose`.
 - `AnySigmaState`: Describes the public shape shared by all sigma-state instances.
 - `AnySigmaStateWithEvents`: Describes a sigma-state instance with a typed event map.
 - `AnyState`: Describes the top-level state object for a sigma type.

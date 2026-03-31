@@ -178,6 +178,7 @@ test("setup returns a single cleanup that owns nested resources", () => {
   const abortController = new AbortController();
   const target = new EventTarget();
   let functionCleanupCount = 0;
+  let disposeCleanupCount = 0;
   let disposableCleanupCount = 0;
   let childCleanupCount = 0;
 
@@ -213,6 +214,11 @@ test("setup returns a single cleanup that owns nested resources", () => {
           functionCleanupCount += 1;
         },
         {
+          dispose() {
+            disposeCleanupCount += 1;
+          },
+        },
+        {
           [Symbol.dispose]() {
             disposableCleanupCount += 1;
           },
@@ -230,6 +236,7 @@ test("setup returns a single cleanup that owns nested resources", () => {
   assert.deepEqual(observedEvents, ["ping"]);
   assert.equal(abortController.signal.aborted, true);
   assert.equal(functionCleanupCount, 1);
+  assert.equal(disposeCleanupCount, 1);
   assert.equal(disposableCleanupCount, 1);
   assert.equal(childCleanupCount, 1);
 });

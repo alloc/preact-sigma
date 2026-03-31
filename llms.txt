@@ -10,7 +10,7 @@
 - `action`: A method declared with `.actions({ ... })` that reads and writes through one Immer draft for one synchronous call.
 - `draft boundary`: Any point where sigma cannot keep reusing the current draft.
 - `setup handler`: A function declared with `.setup(fn)` that returns an array of cleanup resources.
-- `cleanup resource`: A cleanup function, an `AbortController`, or an object with `[Symbol.dispose]()`.
+- `cleanup resource`: A cleanup function, an `AbortController`, an object with `dispose()`, or an object with `[Symbol.dispose]()`.
 - `signal access`: Reading the underlying `ReadonlySignal` for a state property or computed through `instance.get(key)`.
 
 ## Navigation
@@ -75,7 +75,7 @@ import {
 
 - `AnyDefaultState`: Describes the object accepted by `.defaultState(...)`.
 - `AnyEvents`: Describes an event map from event names to payload objects or `void`.
-- `AnyResource`: Describes a supported setup cleanup resource.
+- `AnyResource`: Describes a supported setup cleanup resource, including cleanup functions, `AbortController`, objects with `dispose()`, and objects with `Symbol.dispose`.
 - `AnySigmaState`: Describes the public shape shared by all sigma-state instances.
 - `AnySigmaStateWithEvents`: Describes a sigma-state instance with a typed event map.
 - `AnyState`: Describes the top-level state object for a sigma type.
@@ -296,6 +296,7 @@ Behavior:
 Supported cleanup resources:
 
 - cleanup functions
+- objects with `dispose()`
 - objects with `[Symbol.dispose]()`
 - `AbortController`
 

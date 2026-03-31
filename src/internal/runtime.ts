@@ -347,6 +347,8 @@ function disposeCleanupResource(resource: AnyResource) {
     resource();
   } else if (resource instanceof AbortController) {
     resource.abort();
+  } else if ("dispose" in resource) {
+    resource.dispose();
   } else {
     resource[Symbol.dispose]();
   }
