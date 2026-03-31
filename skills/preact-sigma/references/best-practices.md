@@ -1,6 +1,6 @@
 # preact-sigma Best Practices
 
-This file owns prescriptive guidance for `preact-sigma`. Read [../../../README.md](../../../README.md) for onboarding and [../../../llms.txt](../../../llms.txt) for the exhaustive API and terminology reference.
+This file owns prescriptive guidance for `preact-sigma`. Read `README.md` for onboarding and `llms.txt` for the exhaustive API and terminology reference.
 
 ## Prefer Builder-Driven Inference
 
