@@ -36,6 +36,7 @@ Treat `preact-sigma` as a typed state-model builder built on top of `@preact/sig
 
 ## Navigation
 
+- Read [references/best-practices.md](./references/best-practices.md) for prescriptive guidance on inference, state shape, cleanup, and draft boundaries.
 - Read [references/api-details.md](./references/api-details.md) for the full exported surface.
 - Jump there for constructor and `defaultState` behavior, public instance shape, `observe(...)`, `setup(...)`, hooks/listeners, and advanced utilities.
 

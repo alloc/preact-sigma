@@ -2,6 +2,8 @@
 
 This file contains the extended behavioral reference for `preact-sigma`. Use it when `SKILL.md` is not enough.
 
+For prescriptive guidance on how to structure and use sigma-state models, read [./best-practices.md](./best-practices.md).
+
 ## Table of Contents
 
 - [Runtime Exports](#runtime-exports)

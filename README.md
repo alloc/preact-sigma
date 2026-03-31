@@ -12,10 +12,33 @@ To add `preact-sigma` to your project:
 npm install preact-sigma
 ```
 
-If you use AI coding agents, this repo also includes agent-oriented guidance:
+## Smallest Useful Example
 
-- [llms.txt](./llms.txt) provides a compact overview of the API and recommended patterns.
-- Companion skills are available via `npx skills add alloc/preact-sigma`.
+```ts
+import { SigmaType } from "preact-sigma";
+
+const Counter = new SigmaType<{ count: number }>("Counter")
+  .defaultState({
+    count: 0,
+  })
+  .computed({
+    doubled() {
+      return this.count * 2;
+    },
+  })
+  .actions({
+    increment() {
+      this.count += 1;
+    },
+  });
+
+const counter = new Counter();
+
+counter.increment();
+
+console.log(counter.count); // 1
+console.log(counter.doubled); // 2
+```
 
 ## What It Is
 
@@ -161,13 +184,13 @@ Cleanup resources can be returned as functions, `AbortController`, objects with 
 
 Inside setup, `this` exposes the public instance plus `emit(...)` and `act(fn)`. Use `this.act(function () { ... })` when setup needs one synchronous anonymous action with normal draft, `commit()`, and `emit(...)` semantics, whether that work happens immediately in the setup body or later from a setup-owned callback, but should not become a public action method.
 
-## Best Practices
+## Constructor and Defaults
 
-- Let `new SigmaType<TState, TEvents>()` and the builder inputs drive inference. Avoid forcing extra type arguments onto builder methods.
-- Keep top-level state properties meaningful. Each top-level property gets its own signal, so shape state around the reads you want to track.
-- Use `computed(...)` for argument-free derived state, and use queries for reactive reads that need parameters.
-- Put writes in actions. A draft boundary is any point where sigma cannot keep reusing the current draft. `emit()`, `await`, and any action call other than a same-instance sync nested action call are draft boundaries, so call `this.commit()` before those boundaries when pending writes should become public. Setup can use `this.act(function () { ... })` to run one synchronous anonymous action for initialization work or setup-owned callbacks without adding a public action method.
-- Use `snapshot(instance)` and `replaceState(instance, snapshot)` for committed-state replay. They work on top-level state keys and stay outside action semantics.
-- Use `SigmaRef<T>` when a value should stay by reference in sigma's `Draft` and `Immutable` types. A normal assignment to a `SigmaRef<T>`-typed value only changes typing and does not change Immer's runtime drafting or freezing behavior.
-- Use `immerable` on custom classes only when they should participate in Immer drafting. `setAutoFreeze(false)` disables sigma's runtime deep-freezing when you need published state to stay unfrozen.
-- Use `setup(...)` for owned side effects, and always return cleanup resources for anything the instance starts.
+- `defaultState` values may be plain values or zero-argument initializer functions. Use initializer functions when each instance needs a fresh object, array, or class instance.
+- Constructor input shallowly overrides `defaultState`, so `new TodoList({ draft: "ready" })` replaces only the top-level keys you pass.
+
+## More Docs
+
+- [llms.txt](./llms.txt) provides the exhaustive machine-oriented API guide and terminology.
+- Companion skills are available via `npx skills add alloc/preact-sigma`.
+- The `preact-sigma` skill packages the procedural guidance and agent-oriented workflow for this library.
