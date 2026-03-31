@@ -44,6 +44,7 @@ export type {
   InferSetupArgs,
   SigmaObserveChange,
   SigmaObserveOptions,
+  SigmaRef,
   SigmaState,
 } from "./internal/types.js";
 
