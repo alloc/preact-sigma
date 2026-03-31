@@ -8,7 +8,7 @@
 - `computed`: A tracked getter declared with `.computed({ ... })`.
 - `query`: A tracked method declared with `.queries({ ... })` or created with `query(fn)`.
 - `action`: A method declared with `.actions({ ... })` that reads and writes through one Immer draft for one synchronous call.
-- `setup act callback`: A synchronous function passed to `this.act(...)` inside setup to run one anonymous action.
+- `anonymous action`: A synchronous function passed to `this.act(...)` inside setup to run one anonymous action.
 - `draft boundary`: Any point where sigma cannot keep reusing the current draft.
 - `setup handler`: A function declared with `.setup(fn)` that returns an array of cleanup resources.
 - `cleanup resource`: A cleanup function, an `AbortController`, an object with `dispose()`, or an object with `[Symbol.dispose]()`.
@@ -292,7 +292,9 @@ Behavior:
 - the public `.setup(...)` method always returns one cleanup function
 - `this` inside a setup handler exposes the public instance plus `emit(...)` and `act(fn)`
 - `this.act(fn)` inside setup runs `fn` with normal action semantics without adding a public action method
-- `this.act(fn)` callbacks must stay synchronous
+- use `this.act(fn)` for setup-time initialization work or setup-owned callbacks that need action semantics
+- pass a normal `function () {}` to `this.act(...)` so callback `this` receives the action context
+- `this.act(fn)` functions must stay synchronous
 - each setup handler returns an array of cleanup resources
 - setup typing only exposes computeds, queries, and actions that were already present when that `.setup(...)` call happened
 
