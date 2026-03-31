@@ -7,7 +7,7 @@ import {
   Sigma,
   type SigmaTypeInternals,
 } from "./internal/runtime.js";
-import { sigmaRefBrand, sigmaStateBrand, signalPrefix } from "./internal/symbols.js";
+import { sigmaStateBrand, signalPrefix } from "./internal/symbols.js";
 import type {
   ActionContext,
   AnyDefaultState,
@@ -26,6 +26,7 @@ import type {
   SigmaDefinition,
   SigmaObserveChange,
   SigmaObserveOptions,
+  SigmaRef,
   SigmaState,
 } from "./internal/types.js";
 
@@ -56,7 +57,7 @@ export function isSigmaState(value: unknown): value is AnySigmaState {
  * helpers keep it by reference instead of recursively immerizing it.
  */
 export function ref<T extends object>(value: T) {
-  return value as T & { [sigmaRefBrand]?: true };
+  return value as SigmaRef<T>;
 }
 
 /** Creates a standalone tracked query function with the same signature as `fn`. */

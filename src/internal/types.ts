@@ -13,10 +13,12 @@ type Disposable = {
   [Symbol.dispose](): void;
 };
 
-/** A type brand added by `ref(...)`. */
-export interface SigmaRef {
+interface SigmaRefBrand {
   [sigmaRefBrand]?: true;
 }
+
+/** A type brand added by `ref(...)`. */
+export type SigmaRef<T = unknown> = T & SigmaRefBrand;
 
 /** The event map shape used by sigma types. */
 export type AnyEvents = Record<string, object | void>;
