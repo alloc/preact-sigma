@@ -298,6 +298,59 @@ test("setup cleanup aggregates failures after running every cleanup resource", (
   assert.deepEqual(events, ["cleanup:last", "cleanup:middle", "cleanup:first"]);
 });
 
+test("setup act runs an anonymous action with normal action semantics", () => {
+  const observedCounts: number[] = [];
+
+  const Store = new SigmaType<{ count: number }, { changed: { count: number } }>()
+    .defaultState({
+      count: 0,
+    })
+    .setup(function (step: number) {
+      const nextCount = this.act(function () {
+        this.count += step;
+        this.commit();
+        this.emit("changed", { count: this.count });
+        return this.count;
+      });
+
+      assert.equal(nextCount, step);
+      return [];
+    });
+
+  const store = new Store();
+  const stop = store.on("changed", ({ count }) => {
+    observedCounts.push(count);
+  });
+
+  store.setup(2);
+
+  assert.equal(store.count, 2);
+  assert.deepEqual(observedCounts, [2]);
+  assert.equal((store as any).act, undefined);
+
+  stop();
+});
+
+test("setup act callbacks must stay synchronous", () => {
+  const Store = new SigmaType<{ count: number }>()
+    .defaultState({
+      count: 0,
+    })
+    .setup(function () {
+      this.act(async function () {
+        this.count += 1;
+      });
+      return [];
+    });
+
+  const store = new Store();
+
+  assert.throws(() => {
+    store.setup();
+  }, /act\(\) callbacks must stay synchronous/);
+  assert.equal(store.count, 0);
+});
+
 test("actions reuse one draft and can call queries, computeds, and other actions", () => {
   const Counter = new SigmaType<{ count: number }>()
     .defaultState({

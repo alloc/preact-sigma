@@ -159,55 +159,13 @@ export function buildQueryMethod(queryFunction: AnyFunction) {
 }
 
 export function buildActionMethod(actionName: string, actionFn: AnyFunction) {
-  const actionIsAsync = isAsyncFunction(actionFn);
-
   return function (this: AnySigmaState, ...args: any[]) {
-    const instance = getSigmaInternals(this);
-    if (instance.disposed) {
-      throw new Error("[preact-sigma] Cannot run an action on a disposed sigma state");
-    }
-
-    return untracked(() => {
-      let owner: ActionOwner;
-
-      const callerOwner = getContextOwner(this);
-      if (callerOwner && callerOwner.instance === instance && !actionIsAsync) {
-        owner = callerOwner;
-      } else {
-        handleActionBoundary(callerOwner, "action", actionName);
-        owner = createActionOwner(instance, actionName, actionFn, args);
-      }
-
-      let result: unknown;
-      try {
-        result = actionFn.apply(owner.actionContext, [...args]);
-      } catch (error) {
-        clearCurrentDraft(owner);
-        throw error;
-      }
-
-      if (!actionIsAsync && isPromiseLike(result)) {
-        clearCurrentDraft(owner);
-        void Promise.resolve(result).catch(() => {});
-        throw new Error(
-          `[preact-sigma] Action "${actionName}" must use native async-await syntax to return a promise.`,
-        );
-      }
-
-      if (owner === callerOwner) {
-        return result;
-      }
-
-      const finalized = finalizeOwnerDraft(owner);
-      if (finalized?.changed) {
-        publishState(instance, finalized);
-      }
-      if (isPromiseLike(result)) {
-        return resolveAsyncActionResult(owner, result);
-      }
-      return result;
-    });
+    return runActionInvocation(this, actionName, actionFn, args);
   };
+}
+
+export function runAdHocAction(context: object, actionFn: AnyFunction) {
+  return runActionInvocation(context, "act()", actionFn, []);
 }
 
 export function readActionStateValue(owner: ActionOwner, key: string, options: ContextOptions) {
@@ -323,6 +281,71 @@ function createActionOwner(
   registerSigmaInternals(owner.actionContext, instance);
   registerContextOwner(owner.actionContext, owner);
   return owner;
+}
+
+function runActionInvocation(
+  context: object,
+  actionName: string,
+  actionFn: AnyFunction,
+  args: any[],
+) {
+  const instance = getSigmaInternals(context);
+  if (instance.disposed) {
+    throw new Error("[preact-sigma] Cannot run an action on a disposed sigma state");
+  }
+
+  const isAdHocAction = actionName === "act()";
+  const actionIsAsync = isAsyncFunction(actionFn);
+  if (actionIsAsync && isAdHocAction) {
+    throw new Error("[preact-sigma] act() callbacks must stay synchronous");
+  }
+
+  return untracked(() => {
+    let owner: ActionOwner;
+
+    const callerOwner = getContextOwner(context);
+    if (callerOwner && callerOwner.instance === instance && !actionIsAsync) {
+      owner = callerOwner;
+    } else {
+      handleActionBoundary(callerOwner, "action", actionName);
+      owner = createActionOwner(instance, actionName, actionFn, args);
+    }
+
+    let result: unknown;
+    try {
+      result = actionFn.apply(owner.actionContext, args);
+    } catch (error) {
+      clearCurrentDraft(owner);
+      throw error;
+    }
+
+    if (isAdHocAction && isPromiseLike(result)) {
+      clearCurrentDraft(owner);
+      void Promise.resolve(result).catch(() => {});
+      throw new Error("[preact-sigma] act() callbacks must stay synchronous");
+    }
+
+    if (!actionIsAsync && isPromiseLike(result)) {
+      clearCurrentDraft(owner);
+      void Promise.resolve(result).catch(() => {});
+      throw new Error(
+        `[preact-sigma] Action "${actionName}" must use native async-await syntax to return a promise.`,
+      );
+    }
+
+    if (owner === callerOwner) {
+      return result;
+    }
+
+    const finalized = finalizeOwnerDraft(owner);
+    if (finalized?.changed) {
+      publishState(instance, finalized);
+    }
+    if (isPromiseLike(result)) {
+      return resolveAsyncActionResult(owner, result);
+    }
+    return result;
+  });
 }
 
 function createCommitError(owner: ActionOwner) {

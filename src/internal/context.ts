@@ -5,6 +5,7 @@ import {
   readActionComputedValue,
   readActionStateValue,
   registerSigmaInternals,
+  runAdHocAction,
   setActionStateValue,
   type ActionOwner,
   type SigmaInternals,
@@ -16,6 +17,8 @@ type OwnerContextKind = "action" | "computedDraftAware" | "queryDraftAware";
 type ContextKind = OwnerContextKind | PublicContextKind;
 
 export type ContextOptions = {
+  /** Exposes `this.act(...)` on setup contexts. */
+  allowAct: boolean;
   /** Exposes public action methods on `this`. */
   allowActions: boolean;
   /** Exposes `this.commit()` on action contexts. */
@@ -37,6 +40,7 @@ export type ContextOptions = {
 };
 
 const disabledContextOptions = {
+  allowAct: false,
   allowActions: false,
   allowCommit: false,
   allowEmit: false,
@@ -64,6 +68,7 @@ const publicContextOptions = {
   },
   setup: {
     ...disabledContextOptions,
+    allowAct: true,
     allowActions: true,
     allowEmit: true,
     allowQueries: true,
@@ -137,9 +142,19 @@ function createContext(
 ) {
   const publicPrototype = Object.getPrototypeOf(instance.publicInstance) as AnySigmaState;
   return new Proxy(publicPrototype, {
-    get(_target, key) {
+    get(_target, key, receiver) {
       if (typeof key !== "string") {
         return Reflect.get(publicPrototype, key, owner?.actionContext ?? instance.publicInstance);
+      }
+      if (key === "act") {
+        return options.allowAct
+          ? (actionFn: unknown) => {
+              if (typeof actionFn !== "function") {
+                throw new Error("[preact-sigma] act() requires a function");
+              }
+              return runAdHocAction(receiver, actionFn as (...args: any[]) => unknown);
+            }
+          : undefined;
       }
       if (key === "commit") {
         return options.allowCommit && owner ? () => commitActionOwner(owner) : undefined;

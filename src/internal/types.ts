@@ -109,6 +109,13 @@ export type ActionContext<
     emit: Emit<TEvents>;
   };
 
+type DefinitionEvents<T extends SigmaDefinition> = T["events"] extends AnyEvents ? T["events"] : {};
+type DefinitionComputeds<T extends SigmaDefinition> = T["computeds"] extends object
+  ? T["computeds"]
+  : {};
+type DefinitionQueries<T extends SigmaDefinition> = T["queries"] extends object ? T["queries"] : {};
+type DefinitionActions<T extends SigmaDefinition> = T["actions"] extends object ? T["actions"] : {};
+
 export type AnySigmaType = SigmaType<any, any, any, any, any, any, any>;
 
 /** The public shape shared by all sigma-state instances. */
@@ -180,6 +187,17 @@ export type SigmaState<T extends SigmaDefinition = SigmaDefinition> = AnySigmaSt
   Simplify<UnionToIntersection<MapSigmaDefinition<T>>>;
 
 export type SetupContext<T extends SigmaDefinition> = SigmaState<T> & {
+  act<TResult>(
+    fn: (
+      this: ActionContext<
+        T["state"],
+        DefinitionEvents<T>,
+        DefinitionComputeds<T>,
+        DefinitionQueries<T>,
+        DefinitionActions<T>
+      >,
+    ) => TResult,
+  ): TResult;
   emit: T["events"] extends object ? Emit<T["events"]> : never;
 };
 

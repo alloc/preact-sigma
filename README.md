@@ -159,12 +159,14 @@ In Preact, the same constructor can be used with `useSigma(() => new TodoList(),
 
 Cleanup resources can be returned as functions, `AbortController`, objects with `dispose()`, or objects with `Symbol.dispose`.
 
+Inside setup, `this` exposes the public instance plus `emit(...)` and `act(fn)`. Use `this.act(() => { ... })` when a setup-owned callback needs one synchronous anonymous action with normal draft, `commit()`, and `emit(...)` semantics, but should not become a public action method.
+
 ## Best Practices
 
 - Let `new SigmaType<TState, TEvents>()` and the builder inputs drive inference. Avoid forcing extra type arguments onto builder methods.
 - Keep top-level state properties meaningful. Each top-level property gets its own signal, so shape state around the reads you want to track.
 - Use `computed(...)` for argument-free derived state, and use queries for reactive reads that need parameters.
-- Put writes in actions. A draft boundary is any point where sigma cannot keep reusing the current draft. `emit()`, `await`, and any action call other than a same-instance sync nested action call are draft boundaries, so call `this.commit()` before those boundaries when pending writes should become public.
+- Put writes in actions. A draft boundary is any point where sigma cannot keep reusing the current draft. `emit()`, `await`, and any action call other than a same-instance sync nested action call are draft boundaries, so call `this.commit()` before those boundaries when pending writes should become public. Setup-owned callbacks can use `this.act(() => { ... })` to run one synchronous anonymous action without adding a public action method.
 - Use `snapshot(instance)` and `replaceState(instance, snapshot)` for committed-state replay. They work on top-level state keys and stay outside action semantics.
 - Use `SigmaRef<T>` when a value should stay by reference in sigma's `Draft` and `Immutable` types. A normal assignment to a `SigmaRef<T>`-typed value only changes typing and does not change Immer's runtime drafting or freezing behavior.
 - Use `immerable` on custom classes only when they should participate in Immer drafting. `setAutoFreeze(false)` disables sigma's runtime deep-freezing when you need published state to stay unfrozen.

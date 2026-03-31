@@ -258,3 +258,28 @@ test("inline builder methods infer this for state reads", () => {
       },
     });
 });
+
+test("setup act is typed only on setup contexts", () => {
+  const Store = new SigmaType<{ count: number }, { changed: { count: number } }>()
+    .defaultState({
+      count: 0,
+    })
+    .setup(function () {
+      const nextCount = this.act(function () {
+        assertType<number>(this.count);
+        assertType<void>(this.commit());
+        this.count += 1;
+        this.commit();
+        this.emit("changed", { count: this.count });
+        return this.count;
+      });
+
+      assertType<number>(nextCount);
+      return [];
+    });
+
+  const store = new Store();
+
+  // @ts-expect-error act is only available on setup contexts
+  store.act(function () {});
+});
