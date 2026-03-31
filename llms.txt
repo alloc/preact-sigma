@@ -7,6 +7,7 @@
 - `state property`: A top-level property from `TState`, such as `draft` in `{ draft: string }`.
 - `computed`: A tracked getter declared with `.computed({ ... })`.
 - `query`: A tracked method declared with `.queries({ ... })` or created with `query(fn)`.
+- `ref`: A helper that keeps a value by reference in sigma's `Draft` and `Immutable` types without changing runtime behavior.
 - `action`: A method declared with `.actions({ ... })` that reads and writes through one Immer draft for one synchronous call.
 - `draft boundary`: Any point where sigma cannot keep reusing the current draft.
 - `setup handler`: A function declared with `.setup(fn)` that returns an array of cleanup resources.
@@ -17,6 +18,7 @@
 
 - For state shape, inference, and instance shape, read `Start Here`, `Inference`, `SigmaType`, and `Public Instance Shape`.
 - For mutation semantics, read `Critical Rules`, `actions`, `immerable`, and `setAutoFreeze`.
+- For type-level by-reference values, read `ref`.
 - For side effects and events, read `setup`, `Events`, `listen`, `useListener`, and `useSigma`.
 - For committed-state utilities, read `observe`, `snapshot`, and `replaceState`.
 
@@ -60,6 +62,7 @@ import {
   isSigmaState,
   listen,
   query,
+  ref,
   replaceState,
   setAutoFreeze,
   snapshot,
@@ -324,6 +327,17 @@ Behavior:
 - sigma only freezes published values that Immer considers draftable
 - custom class instances without a true `[immerable]` property stay outside that freeze path
 - plain objects, arrays, `Map`, and `Set` already participate in normal Immer drafting without extra markers
+
+## `ref(value)`
+
+`ref(value)` returns `value` unchanged and marks its type so sigma's `Draft` and `Immutable` helpers keep that value by reference.
+
+Behavior:
+
+- it has no runtime effect
+- it only changes sigma's local `Draft` and `Immutable` typing
+- it prevents type-level recursive immerization for that value
+- it does not change whether Immer drafts or freezes the value at runtime
 
 ## `query(fn)`
 
