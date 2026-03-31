@@ -18,7 +18,7 @@ import {
   isSigmaState,
   listen,
   query,
-  ref,
+  type SigmaRef,
   replaceState,
   setAutoFreeze,
   snapshot,
@@ -105,7 +105,7 @@ Behavior:
 ## Advanced Utilities
 
 - **`immerable`**: Re-exported from Immer so custom classes can opt into drafting with `[immerable] = true`. Unmarked custom classes stay outside Immer drafting and deep-freezing. Plain objects, arrays, `Map`, and `Set` work by default.
-- **`ref(value)`**: Returns `value` unchanged and marks its type so sigma's `Draft` and `Immutable` helpers keep that value by reference. It only changes typing and does not change Immer runtime drafting or freezing.
+- **`SigmaRef<T>`**: A type brand that keeps a value by reference in sigma's `Draft` and `Immutable` helpers. Assigning to a `SigmaRef<T>`-typed value only changes typing and does not change Immer runtime drafting or freezing.
 - **`setAutoFreeze(autoFreeze)`**: Controls whether sigma deep-freezes published public state at runtime (enabled by default).
 - **`snapshot(instance)`**: Returns a shallow snapshot of an instance's committed public state (does not include computeds, queries, or recurse into nested sigma states).
 - **`replaceState(instance, snapshot)`**: Replaces committed public state from a plain snapshot object, notifying observers.

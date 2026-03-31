@@ -5,11 +5,11 @@ import {
   action,
   immerable,
   query,
-  ref,
   replaceState,
   setAutoFreeze,
   SigmaType,
   snapshot,
+  type SigmaRef,
   type SigmaState,
 } from "preact-sigma";
 
@@ -144,8 +144,12 @@ test("sigma infers public state from the two-step declaration", () => {
     count = 1;
   }
 
-  const createRefCache = () =>
-    ref({
+  const createRefCache = (): SigmaRef<{
+    count: number;
+    nested: {
+      label: string;
+    };
+  }> => ({
       count: 1,
       nested: {
         label: "cache",

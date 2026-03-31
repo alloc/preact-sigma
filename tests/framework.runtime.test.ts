@@ -6,7 +6,6 @@ import {
   immerable,
   listen,
   query,
-  ref,
   replaceState,
   setAutoFreeze,
   SigmaType,
@@ -125,15 +124,6 @@ test("snapshot returns committed public state and computed getters stay out of e
     Object.getOwnPropertyDescriptor(Object.getPrototypeOf(counter), "doubled")?.enumerable,
     false,
   );
-});
-
-test("ref returns the original object without runtime tagging", () => {
-  const value = {
-    count: 1,
-  };
-
-  assert.strictEqual(ref(value), value);
-  assert.deepEqual(Object.getOwnPropertySymbols(value), []);
 });
 
 test("listen unwraps sigma-state event payloads and supports void events", () => {

@@ -17,7 +17,7 @@ interface SigmaRefBrand {
   [sigmaRefBrand]?: true;
 }
 
-/** A type brand added by `ref(...)`. */
+/** A type brand that keeps a value by reference in sigma's `Draft` and `Immutable` helpers. */
 export type SigmaRef<T = unknown> = T & SigmaRefBrand;
 
 /** The event map shape used by sigma types. */

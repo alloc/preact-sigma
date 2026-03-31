@@ -164,6 +164,6 @@ In Preact, the same constructor can be used with `useSigma(() => new TodoList(),
 - Use `computed(...)` for argument-free derived state, and use queries for reactive reads that need parameters.
 - Put writes in actions. A draft boundary is any point where sigma cannot keep reusing the current draft. `emit()`, `await`, and any action call other than a same-instance sync nested action call are draft boundaries, so call `this.commit()` before those boundaries when pending writes should become public.
 - Use `snapshot(instance)` and `replaceState(instance, snapshot)` for committed-state replay. They work on top-level state keys and stay outside action semantics.
-- Use `ref(value)` when a value should stay by reference in sigma's `Draft` and `Immutable` types. It only changes typing and does not change Immer's runtime drafting or freezing behavior.
+- Use `SigmaRef<T>` when a value should stay by reference in sigma's `Draft` and `Immutable` types. A normal assignment to a `SigmaRef<T>`-typed value only changes typing and does not change Immer's runtime drafting or freezing behavior.
 - Use `immerable` on custom classes only when they should participate in Immer drafting. `setAutoFreeze(false)` disables sigma's runtime deep-freezing when you need published state to stay unfrozen.
 - Use `setup(...)` for owned side effects, and always return cleanup resources for anything the instance starts.
