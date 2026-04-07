@@ -159,9 +159,8 @@ export function CommandPaletteExample() {
   return (
     <section>
       <p>
-        <strong>Command palette</strong>: setup-owned keyboard shortcuts, computed getters,
-        tracked queries with args, typed events, nested sigma state, and a mutable custom class
-        instance.
+        <strong>Command palette</strong>: setup-owned keyboard shortcuts, computed getters, tracked
+        queries with args, typed events, nested sigma state, and a mutable custom class instance.
       </p>
 
       <label>

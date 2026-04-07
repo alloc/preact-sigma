@@ -150,11 +150,11 @@ test("sigma infers public state from the two-step declaration", () => {
       label: string;
     };
   }> => ({
-      count: 1,
-      nested: {
-        label: "cache",
-      },
-    });
+    count: 1,
+    nested: {
+      label: "cache",
+    },
+  });
 
   type RefCache = ReturnType<typeof createRefCache>;
 
