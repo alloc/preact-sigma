@@ -78,7 +78,7 @@ export function isAutoFreeze() {
   return autoFreezeEnabled;
 }
 
-/** Controls whether sigma deep-freezes published public state. Auto-freezing starts enabled. */
+/** Controls whether sigma deep-freezes published public state. Auto-freezing starts enabled and the setting is shared across instances. */
 export function setAutoFreeze(autoFreeze: boolean) {
   autoFreezeEnabled = autoFreeze;
   immer.setAutoFreeze(autoFreeze);
@@ -519,8 +519,9 @@ function publishState(instance: SigmaInternals, finalized: FinalizedDraftResult)
  * Returns a shallow snapshot of an instance's committed public state.
  *
  * The snapshot includes one own property for each top-level state key and reads
- * the current committed value for that key. Its type is inferred from the
- * instance's sigma-state definition.
+ * the current committed value for that key. Nested sigma states remain as
+ * referenced values. Its type is inferred from the instance's sigma-state
+ * definition.
  */
 export function snapshot<T extends AnySigmaState>(
   publicInstance: T,
@@ -532,8 +533,9 @@ export function snapshot<T extends AnySigmaState>(
  * Replaces an instance's committed public state from a snapshot object.
  *
  * The replacement snapshot must be a plain object with exactly the instance's
- * top-level state keys. Its type is inferred from the instance's sigma-state
- * definition.
+ * top-level state keys. It updates committed state outside action semantics and
+ * notifies observers when the committed state changes. Its type is inferred
+ * from the instance's sigma-state definition.
  */
 export function replaceState<T extends AnySigmaState>(
   publicInstance: T,

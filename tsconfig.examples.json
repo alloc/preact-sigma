@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "composite": true,
+    "strict": true,
+    "types": ["node"],
+    "lib": ["dom", "esnext"],
+    "target": "esnext",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "ignoreDeprecations": "6.0",
+    "baseUrl": ".",
+    "paths": {
+      "preact-sigma": ["./src/index.ts"]
+    },
+    "allowImportingTsExtensions": true,
+    "emitDeclarationOnly": true,
+    "rootDir": ".",
+    "jsx": "react-jsx",
+    "jsxImportSource": "preact"
+  },
+  "include": ["examples/**/*.ts", "examples/**/*.tsx"]
+}

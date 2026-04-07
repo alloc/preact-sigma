@@ -9,12 +9,12 @@ type TypedEventListener<TEventMap, TEvent extends string, TCurrentTarget extends
   },
 ) => void) & { __eventType?: string extends TEvent ? keyof TEventMap : TEvent };
 
-/** Infers the supported event names for a listener target. */
+/** Infers the event names accepted by `listen(...)` or `useListener(...)` for a target. */
 export type InferEventType<TTarget extends EventTarget> =
   | (InferListener<TTarget> extends { __eventType?: infer TEvent } ? string & TEvent : never)
   | (string & {});
 
-/** Infers the listener function signature for a target and event name. */
+/** Infers the listener callback shape for a target and event name. Sigma states receive payloads directly, while DOM targets receive typed events. */
 export type InferListener<TTarget extends EventTarget, TEvent extends string = string> =
   TTarget extends AnySigmaStateWithEvents<infer TEvents>
     ? TEvent extends keyof TEvents
@@ -36,7 +36,7 @@ export type InferListener<TTarget extends EventTarget, TEvent extends string = s
                   ? TypedEventListener<SVGElementEventMap, TEvent, TTarget>
                   : (event: Event & { readonly currentTarget: TTarget }) => void;
 
-/** Adds an event listener and returns a cleanup function that removes it. */
+/** Adds a listener to a sigma state or DOM target and returns a cleanup function that removes it. */
 export function listen<TTarget extends EventTarget, TEvent extends InferEventType<TTarget>>(
   target: TTarget,
   name: TEvent,

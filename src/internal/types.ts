@@ -28,7 +28,7 @@ export type AnyEvents = Record<string, object | void>;
 /** The top-level state object shape used by sigma types. */
 export type AnyState = Record<string, unknown>;
 
-/** The object accepted by `.defaultState(...)`. */
+/** The object accepted by `.defaultState(...)`, where each property may be a value or a zero-argument initializer. */
 export type AnyDefaultState<TState extends AnyState> = {
   [K in keyof TState]?: DefaultStateValue<TState[K]>;
 };
@@ -69,6 +69,7 @@ export type EventMethods<TEvents extends AnyEvents | undefined> = [undefined] ex
   ? never
   : {
       readonly [sigmaEventsBrand]: TEvents;
+      /** Registers a typed event listener and returns an unsubscribe function. */
       on<TEvent extends string & keyof TEvents>(
         name: TEvent,
         listener: [TEvents[TEvent]] extends [void]
@@ -80,6 +81,7 @@ export type EventMethods<TEvents extends AnyEvents | undefined> = [undefined] ex
 export type SetupMethods<TSetupArgs extends any[] | undefined> = [TSetupArgs] extends [undefined]
   ? never
   : {
+      /** Runs every registered setup handler and returns one cleanup function for the active setup. */
       setup(...args: Extract<TSetupArgs, any[]>): Cleanup;
     };
 
@@ -106,6 +108,7 @@ export type ActionContext<
   ActionMethods<TActions> & {
     /** Publishes the current action draft immediately so later boundaries use committed state. */
     commit(): void;
+    /** Emits a typed event from the current action. */
     emit: Emit<TEvents>;
   };
 
@@ -130,6 +133,7 @@ export type AnySigmaStateWithEvents<TEvents extends AnyEvents> = AnySigmaState &
 
 /** Options accepted by `.observe(...)`. */
 export type SigmaObserveOptions = {
+  /** Includes Immer patches and inverse patches on the delivered change object. */
   patches?: boolean;
 };
 
@@ -154,6 +158,7 @@ export type SigmaDefinition = {
 };
 
 interface SignalAccessors<T extends object> {
+  /** Returns the underlying signal for a top-level state property or computed. */
   get<K extends keyof T>(key: K): ReadonlySignal<T[K]>;
 }
 
@@ -182,11 +187,12 @@ type MapSigmaDefinition<T extends SigmaDefinition> = keyof T extends infer K
               : never
   : never;
 
-/** The public instance shape produced by a configured sigma type. */
+/** The public instance shape produced by a configured sigma type, including signal access inferred from the definition. */
 export type SigmaState<T extends SigmaDefinition = SigmaDefinition> = AnySigmaState &
   Simplify<UnionToIntersection<MapSigmaDefinition<T>>>;
 
 export type SetupContext<T extends SigmaDefinition> = SigmaState<T> & {
+  /** Runs a synchronous anonymous action from setup so reads and writes use normal action semantics. */
   act<TResult>(
     fn: (
       this: ActionContext<
@@ -198,6 +204,7 @@ export type SetupContext<T extends SigmaDefinition> = SigmaState<T> & {
       >,
     ) => TResult,
   ): TResult;
+  /** Emits a typed event from setup. */
   emit: T["events"] extends object ? Emit<T["events"]> : never;
 };
 

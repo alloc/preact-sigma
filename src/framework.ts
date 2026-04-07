@@ -47,19 +47,28 @@ export type {
   SigmaState,
 } from "./internal/types.js";
 
-/** Checks whether a value is a sigma-state instance. */
+/** Checks whether a value is an instance created by a configured sigma type. */
 export function isSigmaState(value: unknown): value is AnySigmaState {
   return Boolean(value && typeof value === "object" && (value as AnySigmaState)[sigmaStateBrand]);
 }
 
-/** Creates a standalone tracked query function with the same signature as `fn`. */
+/**
+ * Creates a standalone tracked query helper with the same signature as `fn`.
+ *
+ * Each call is reactive at the call site and does not memoize results across
+ * invocations, which makes `query(fn)` a good fit for local tracked helpers
+ * that do not need to live on the sigma-state instance.
+ */
 export function query<TArgs extends any[], TResult>(fn: (this: void, ...args: TArgs) => TResult) {
   return ((...args: TArgs) => computed(() => fn(...args)).value) as typeof fn;
 }
 
 /**
- * Builds sigma-state constructors by accumulating default state, computeds, queries,
- * observers, actions, and setup handlers.
+ * Builds sigma-state constructors by accumulating default state, computeds,
+ * queries, observers, actions, and setup handlers.
+ *
+ * State and event inference starts from `new SigmaType<TState, TEvents>()`.
+ * Later builder methods infer names and types from the objects you pass to them.
  */
 // oxlint-disable-next-line typescript/no-unsafe-declaration-merging
 export class SigmaType<
@@ -182,6 +191,12 @@ export interface SigmaType<
   TActions extends object,
   TSetupArgs extends any[],
 > {
+  /**
+   * Creates a sigma-state instance.
+   *
+   * Constructor input shallowly overrides `defaultState(...)`. Required keys are
+   * inferred from whichever state properties still do not have defaults.
+   */
   new (...args: InitialStateInput<TState, TDefaults>): SigmaState<
     Extract<
       OmitEmpty<{
@@ -196,7 +211,12 @@ export interface SigmaType<
     >
   >;
 
-  /** Does not exist at runtime, only for type inference. */
+  /**
+   * Type-only access to the configured instance shape.
+   *
+   * This property does not exist at runtime. Its type is inferred from the
+   * generics on `new SigmaType<TState, TEvents>()` plus the later builder inputs.
+   */
   get Instance(): SigmaState<
     Extract<
       OmitEmpty<{
@@ -211,6 +231,12 @@ export interface SigmaType<
     >
   >;
 
+  /**
+   * Adds top-level public state and default values to the builder.
+   *
+   * Each property becomes a reactive public state property on instances. Use a
+   * zero-argument function when each instance needs a fresh object or array.
+   */
   defaultState<TNextDefaults extends AnyDefaultState<TState>>(
     defaultState: TNextDefaults,
   ): SigmaType<
@@ -223,6 +249,12 @@ export interface SigmaType<
     TSetupArgs
   >;
 
+  /**
+   * Adds reactive getter properties for derived values that take no arguments.
+   *
+   * Computed names and return types are inferred from the object you pass.
+   * `this` exposes readonly state plus computeds that are already on the builder.
+   */
   computed<TNextComputeds extends object>(
     computeds: TNextComputeds &
       ThisType<ComputedContext<TState, MergeObjects<TComputeds, TNextComputeds>>>,
@@ -236,6 +268,13 @@ export interface SigmaType<
     TSetupArgs
   >;
 
+  /**
+   * Adds reactive read methods that accept arguments.
+   *
+   * Query names, parameters, and return types are inferred from the object you
+   * pass. Each call tracks reactively at the call site and does not memoize
+   * results across invocations.
+   */
   queries<TNextQueries extends object>(
     queries: TNextQueries &
       ThisType<ReadonlyContext<TState, TComputeds, MergeObjects<TQueries, TNextQueries>>>,
@@ -249,6 +288,12 @@ export interface SigmaType<
     TSetupArgs
   >;
 
+  /**
+   * Adds a committed-state observer.
+   *
+   * Observers run after successful publishes and can opt into Immer patches
+   * with `{ patches: true }`.
+   */
   observe(
     listener: (
       this: ReadonlyContext<TState, TComputeds, TQueries>,
@@ -291,6 +336,12 @@ export interface SigmaType<
     TSetupArgs
   >;
 
+  /**
+   * Adds an explicit setup handler for side effects and owned resources.
+   *
+   * Every registered handler runs when `instance.setup(...)` is called, and the
+   * setup argument list is inferred from the first handler you add.
+   */
   setup<TNextSetupArgs extends [TSetupArgs] extends [never] ? any[] : NonNullable<TSetupArgs>>(
     setup: (
       this: SetupContext<{

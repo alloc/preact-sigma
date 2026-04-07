@@ -34,7 +34,7 @@ const matchesText = query((command: Command, draft: string) => {
 
 const SearchHistory = new SigmaType<{
   items: string[];
-}>()
+}>("SearchHistory")
   .defaultState({
     items: [],
   })
@@ -62,7 +62,7 @@ const CommandPalette = new SigmaType<
   {
     ran: Command;
   }
->()
+>("CommandPalette")
   .defaultState({
     commands: [
       { id: "inbox", title: "Open inbox", keywords: ["mail", "messages", "triage"] },
@@ -126,9 +126,6 @@ const CommandPalette = new SigmaType<
   })
   .setup(function () {
     return [
-      // @ts-expect-error - if `history` had a setup method, you would call it here
-      this.history.setup(),
-
       listen(window, "keydown", (event) => {
         if ((event.metaKey || event.ctrlKey) && event.key === "k") {
           event.preventDefault();
@@ -151,8 +148,8 @@ const CommandPalette = new SigmaType<
 
 interface CommandPalette extends InstanceType<typeof CommandPalette> {}
 
-export function Showcase() {
-  const palette = useSigma(() => new CommandPalette(), []);
+export function CommandPaletteExample() {
+  const palette = useSigma(() => new CommandPalette());
   const [lastRun, setLastRun] = useState<string>("Nothing yet");
 
   useListener(palette, "ran", (command) => {
@@ -162,8 +159,9 @@ export function Showcase() {
   return (
     <section>
       <p>
-        <strong>V2 showcase</strong>: setup-owned keyboard shortcuts, computed getters, tracked
-        queries with args, typed events, nested sigma state, and a mutable custom class instance.
+        <strong>Command palette</strong>: setup-owned keyboard shortcuts, computed getters,
+        tracked queries with args, typed events, nested sigma state, and a mutable custom class
+        instance.
       </p>
 
       <label>
