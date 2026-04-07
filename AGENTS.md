@@ -7,6 +7,7 @@
   - Call out especially useful behavior when it clarifies intent, particularly for nested or non-obvious use cases.
   - Prefer plain prose doc comments over JSDoc tags like `@param` and `@returns`, and use those tags only when they materially clarify a complex API.
   - Keep AI-specific authoring conventions, naming guidance, and other best-practice material out of the public API surface.
+  - Group related guidance together in docs. Do not combine unrelated recommendations into the same bullet, paragraph, or section item just to save space.
 - Import style
   - Prefer namespace imports for runtime helper modules when that avoids local aliasing, for example `import * as moduleName` instead of renamed imports.
 - Performance guidance
