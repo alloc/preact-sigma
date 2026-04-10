@@ -43,5 +43,5 @@ console.log(counter.doubled); // 2
 - Concepts, lifecycle, invariants, and API selection live in [`docs/context.md`](./docs/context.md).
 - Quick-start usage lives in [`examples/basic-counter.ts`](./examples/basic-counter.ts).
 - An advanced end-to-end example lives in [`examples/command-palette.tsx`](./examples/command-palette.tsx).
-- Focused examples for non-obvious APIs live in [`examples/async-commit.ts`](./examples/async-commit.ts), [`examples/observe-and-restore.ts`](./examples/observe-and-restore.ts), [`examples/signal-access.ts`](./examples/signal-access.ts), and [`examples/setup-act.ts`](./examples/setup-act.ts).
+- Focused examples for non-obvious APIs live in [`examples/async-commit.ts`](./examples/async-commit.ts), [`examples/observe-and-restore.ts`](./examples/observe-and-restore.ts), [`examples/setup-act.ts`](./examples/setup-act.ts), [`examples/sigma-target.ts`](./examples/sigma-target.ts), and [`examples/signal-access.ts`](./examples/signal-access.ts).
 - Exact exported signatures live in `dist/index.d.mts` after `pnpm build`.

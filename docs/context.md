@@ -1,6 +1,6 @@
 # Overview
 
-`preact-sigma` builds reusable state models from one definition. A configured `SigmaType` owns top-level state, derived reads, writes, setup handlers, and typed events. Each top-level state property is exposed as a reactive public property backed by its own Preact signal, while actions use Immer-style mutation semantics to publish committed state.
+`preact-sigma` builds reusable state models from one definition. A configured `SigmaType` owns top-level state, derived reads, writes, setup handlers, and typed events. Each top-level state property is exposed as a reactive public property backed by its own Preact signal, while actions use Immer-style mutation semantics to publish committed state. For event-only flows, `SigmaTarget` provides a standalone typed event hub with no managed state.
 
 # When to Use
 
@@ -21,6 +21,7 @@
 
 - Sigma type: the builder returned by `new SigmaType<TState, TEvents>()`. After configuration, it is also the constructor for instances.
 - Sigma state: an instance created from a configured sigma type.
+- Sigma target: a standalone typed event hub created with `new SigmaTarget<TEvents>()` when you need typed events without managed state.
 - State property: a top-level key from `TState`. Each one becomes a readonly reactive public property and gets its own signal.
 - Computed: an argument-free derived getter declared with `.computed(...)`.
 - Query: a reactive read that accepts arguments, declared with `.queries(...)` or built locally with `query(fn)`.

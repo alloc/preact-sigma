@@ -53,7 +53,7 @@ export type InferEventType<TTarget extends EventTarget> =
 
 /**
  * A standalone typed event hub with `emit(...)` and `on(...)` methods and full
- * `EventTarget` compatibility.
+ * `EventTarget`, `listen(...)`, and `useListener(...)` compatibility.
  */
 export class SigmaTarget<TEvents extends AnyEvents = {}> extends EventTarget {
   declare readonly [sigmaEventsBrand]: TEvents;
