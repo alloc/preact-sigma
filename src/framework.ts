@@ -48,8 +48,8 @@ export type {
 } from "./internal/types.js";
 
 /** Checks whether a value is an instance created by a configured sigma type. */
-export function isSigmaState(value: unknown): value is AnySigmaState {
-  return Boolean(value && typeof value === "object" && (value as AnySigmaState)[sigmaStateBrand]);
+export function isSigmaState(value: object): value is AnySigmaState {
+  return Boolean((value as AnySigmaState)[sigmaStateBrand]);
 }
 
 /**

@@ -51,6 +51,7 @@
 - Own timers, listeners, subscriptions, or nested setup: `.setup(...)`
 - Use a sigma state inside a component: `useSigma(...)`
 - Subscribe to sigma or DOM events in a component: `useListener(...)`
+- Create a standalone typed event hub with no managed state: `new SigmaTarget<TEvents>()`, `hub.emit(...)`, and `hub.on(...)`
 - Subscribe outside components: `.on(...)` or `listen(...)`
 - Read or restore committed top-level state: `snapshot(...)` and `replaceState(...)`
 

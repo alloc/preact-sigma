@@ -4,11 +4,14 @@ import { assertType, expectTypeOf, test } from "vitest";
 import {
   action,
   immerable,
+  listen,
   query,
   replaceState,
   setAutoFreeze,
+  SigmaTarget,
   SigmaType,
   snapshot,
+  useListener,
   type SigmaRef,
   type SigmaState,
 } from "preact-sigma";
@@ -231,6 +234,58 @@ test("sigma infers public state from the two-step declaration", () => {
       },
       { patches: true },
     );
+});
+
+test("SigmaTarget infers typed events for listen and useListener", () => {
+  const hub = new SigmaTarget<{
+    opened: {
+      id: string;
+    };
+    closed: void;
+  }>();
+
+  assertType<() => void>(
+    hub.on("opened", (payload) => {
+      expectTypeOf(payload).toEqualTypeOf<{
+        id: string;
+      }>();
+    }),
+  );
+
+  assertType<void>(
+    hub.emit("opened", {
+      id: "a",
+    }),
+  );
+  assertType<void>(hub.emit("closed"));
+
+  assertType<() => void>(hub.on("closed", () => {}));
+
+  assertType<() => void>(
+    listen(hub, "opened", (payload) => {
+      expectTypeOf(payload).toEqualTypeOf<{
+        id: string;
+      }>();
+    }),
+  );
+
+  assertType<void>(
+    useListener(hub, "opened", (payload) => {
+      expectTypeOf(payload).toEqualTypeOf<{
+        id: string;
+      }>();
+    }),
+  );
+
+  listen(hub, "missing", (arg) => {
+    assertType<never>(arg);
+  });
+  hub.emit("opened", {
+    // @ts-expect-error SigmaTarget payloads come from its event map
+    missing: true,
+  });
+  // @ts-expect-error Void events do not accept payloads
+  hub.emit("closed", {});
 });
 
 test("inline builder methods infer this for state reads", () => {

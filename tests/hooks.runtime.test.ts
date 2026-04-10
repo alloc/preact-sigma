@@ -5,7 +5,7 @@ import { render, type FunctionComponent, h } from "preact";
 import { act } from "preact/test-utils";
 import { afterEach, assert, test } from "vitest";
 
-import { SigmaType, useListener, useSigma } from "preact-sigma";
+import { SigmaTarget, SigmaType, useListener, useSigma } from "preact-sigma";
 
 function createContainer() {
   const container = document.createElement("div");
@@ -125,6 +125,37 @@ test("useListener keeps the latest callback", async () => {
 
   await act(() => render(h(Probe, { label: "c", target: null }), container));
   window.dispatchEvent(new CustomEvent("sigma-v2-ping", { detail: 3 }));
+
+  assert.deepEqual(observed, ["a:1", "b:2"]);
+});
+
+test("useListener subscribes to SigmaTarget hubs", async () => {
+  const container = createContainer();
+  const observed: string[] = [];
+  const target = new SigmaTarget<{
+    ping: {
+      count: number;
+    };
+  }>();
+
+  const Probe: FunctionComponent<{
+    label: string;
+    target: SigmaTarget<{ ping: { count: number } }> | null;
+  }> = ({ label, target }) => {
+    useListener(target, "ping", (payload) => {
+      observed.push(`${label}:${payload.count}`);
+    });
+    return null;
+  };
+
+  await act(() => render(h(Probe, { label: "a", target }), container));
+  target.emit("ping", { count: 1 });
+
+  await act(() => render(h(Probe, { label: "b", target }), container));
+  target.emit("ping", { count: 2 });
+
+  await act(() => render(h(Probe, { label: "c", target: null }), container));
+  target.emit("ping", { count: 3 });
 
   assert.deepEqual(observed, ["a:1", "b:2"]);
 });

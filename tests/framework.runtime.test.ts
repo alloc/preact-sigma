@@ -8,6 +8,7 @@ import {
   query,
   replaceState,
   setAutoFreeze,
+  SigmaTarget,
   SigmaType,
   snapshot,
   type SigmaState,
@@ -171,6 +172,40 @@ test("listen unwraps sigma-state event payloads and supports void events", () =>
   todoList.reset();
 
   assert.deepEqual(observed, ["added:Ship v2", "reset"]);
+});
+
+test("SigmaTarget works as a standalone typed event hub", () => {
+  const hub = new SigmaTarget<{
+    added: {
+      title: string;
+    };
+    reset: void;
+  }>();
+  const observed: string[] = [];
+
+  const stopAdded = hub.on("added", (payload) => {
+    observed.push(`on:${payload.title}`);
+  });
+  const stopObserved = listen(hub, "added", (payload) => {
+    observed.push(`listen:${payload.title}`);
+  });
+  const stopReset = listen(hub, "reset", () => {
+    observed.push("reset");
+  });
+
+  hub.emit("added", {
+    title: "Ship v2",
+  });
+  hub.emit("reset");
+  stopAdded();
+  stopObserved();
+  stopReset();
+  hub.emit("added", {
+    title: "Ignored",
+  });
+  hub.emit("reset");
+
+  assert.deepEqual(observed, ["on:Ship v2", "listen:Ship v2", "reset"]);
 });
 
 test("setup returns a single cleanup that owns nested resources", () => {
