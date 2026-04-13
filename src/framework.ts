@@ -11,7 +11,6 @@ import { sigmaStateBrand, signalPrefix } from "./internal/symbols.js";
 import type {
   ActionContext,
   AnyDefaultState,
-  AnyEvents,
   AnyFunction,
   AnyResource,
   AnySigmaState,
@@ -20,6 +19,7 @@ import type {
   ComputedContext,
   InitialStateInput,
   MergeObjects,
+  MergeSigmaDefinition,
   OmitEmpty,
   ReadonlyContext,
   SetupContext,
@@ -72,13 +72,8 @@ export function query<TArgs extends any[], TResult>(fn: (this: void, ...args: TA
  */
 // oxlint-disable-next-line typescript/no-unsafe-declaration-merging
 export class SigmaType<
-  TState extends AnyState,
-  TEvents extends AnyEvents = {},
-  TDefaults extends AnyDefaultState<TState> = {},
-  TComputeds extends object = {},
-  TQueries extends object = {},
-  TActions extends object = {},
-  TSetupArgs extends any[] = never,
+  T extends SigmaDefinition = SigmaDefinition,
+  TDefaults extends AnyDefaultState<Extract<T["state"], object>> = {},
 > extends Function {
   constructor(name: string = "Sigma") {
     super();
@@ -169,27 +164,14 @@ export class SigmaType<
       return this;
     };
 
-    return SigmaTypeBuilder as SigmaType<
-      TState,
-      TEvents,
-      TDefaults,
-      TComputeds,
-      TQueries,
-      TActions,
-      TSetupArgs
-    >;
+    return SigmaTypeBuilder as SigmaType<T, TDefaults>;
   }
 }
 
 /** The constructor shape exposed by a configured sigma type. */
 export interface SigmaType<
-  TState extends AnyState,
-  TEvents extends AnyEvents,
-  TDefaults extends AnyDefaultState<TState>,
-  TComputeds extends object,
-  TQueries extends object,
-  TActions extends object,
-  TSetupArgs extends any[],
+  T extends SigmaDefinition,
+  TDefaults extends AnyDefaultState<Extract<T["state"], object>>,
 > {
   /**
    * Creates a sigma-state instance.
@@ -197,19 +179,9 @@ export interface SigmaType<
    * Constructor input shallowly overrides `defaultState(...)`. Required keys are
    * inferred from whichever state properties still do not have defaults.
    */
-  new (...args: InitialStateInput<TState, TDefaults>): SigmaState<
-    Extract<
-      OmitEmpty<{
-        state: TState;
-        events: TEvents;
-        computeds: TComputeds;
-        queries: TQueries;
-        actions: TActions;
-        setupArgs: TSetupArgs;
-      }>,
-      SigmaDefinition
-    >
-  >;
+  new (
+    ...args: InitialStateInput<T["state"], TDefaults>
+  ): SigmaState<Extract<OmitEmpty<T>, SigmaDefinition>>;
 
   /**
    * Type-only access to the configured instance shape.
@@ -217,19 +189,7 @@ export interface SigmaType<
    * This property does not exist at runtime. Its type is inferred from the
    * generics on `new SigmaType<TState, TEvents>()` plus the later builder inputs.
    */
-  get Instance(): SigmaState<
-    Extract<
-      OmitEmpty<{
-        state: TState;
-        events: TEvents;
-        computeds: TComputeds;
-        queries: TQueries;
-        actions: TActions;
-        setupArgs: TSetupArgs;
-      }>,
-      SigmaDefinition
-    >
-  >;
+  get Instance(): SigmaState<Extract<OmitEmpty<T>, SigmaDefinition>>;
 
   /**
    * Adds top-level public state and default values to the builder.
@@ -237,17 +197,9 @@ export interface SigmaType<
    * Each property becomes a reactive public state property on instances. Use a
    * zero-argument function when each instance needs a fresh object or array.
    */
-  defaultState<TNextDefaults extends AnyDefaultState<TState>>(
+  defaultState<TNextDefaults extends AnyDefaultState<T["state"]>>(
     defaultState: TNextDefaults,
-  ): SigmaType<
-    TState,
-    TEvents,
-    MergeObjects<TDefaults, TNextDefaults>,
-    TComputeds,
-    TQueries,
-    TActions,
-    TSetupArgs
-  >;
+  ): SigmaType<T, MergeObjects<TDefaults, TNextDefaults>>;
 
   /**
    * Adds reactive getter properties for derived values that take no arguments.
@@ -256,17 +208,8 @@ export interface SigmaType<
    * `this` exposes readonly state plus computeds that are already on the builder.
    */
   computed<TNextComputeds extends object>(
-    computeds: TNextComputeds &
-      ThisType<ComputedContext<TState, MergeObjects<TComputeds, TNextComputeds>>>,
-  ): SigmaType<
-    TState,
-    TEvents,
-    TDefaults,
-    MergeObjects<TComputeds, TNextComputeds>,
-    TQueries,
-    TActions,
-    TSetupArgs
-  >;
+    computeds: TNextComputeds & ThisType<ComputedContext<T, { computeds: TNextComputeds }>>,
+  ): SigmaType<MergeSigmaDefinition<T, { computeds: TNextComputeds }>, TDefaults>;
 
   /**
    * Adds reactive read methods that accept arguments.
@@ -276,17 +219,8 @@ export interface SigmaType<
    * results across invocations.
    */
   queries<TNextQueries extends object>(
-    queries: TNextQueries &
-      ThisType<ReadonlyContext<TState, TComputeds, MergeObjects<TQueries, TNextQueries>>>,
-  ): SigmaType<
-    TState,
-    TEvents,
-    TDefaults,
-    TComputeds,
-    MergeObjects<TQueries, TNextQueries>,
-    TActions,
-    TSetupArgs
-  >;
+    queries: TNextQueries & ThisType<ReadonlyContext<T, { queries: TNextQueries }>>,
+  ): SigmaType<MergeSigmaDefinition<T, { queries: TNextQueries }>, TDefaults>;
 
   /**
    * Adds a committed-state observer.
@@ -295,18 +229,12 @@ export interface SigmaType<
    * with `{ patches: true }`.
    */
   observe(
-    listener: (
-      this: ReadonlyContext<TState, TComputeds, TQueries>,
-      change: SigmaObserveChange<TState>,
-    ) => void,
+    listener: (this: ReadonlyContext<T>, change: SigmaObserveChange<T["state"]>) => void,
     options?: SigmaObserveOptions & { patches?: false | undefined },
   ): this;
 
   observe(
-    listener: (
-      this: ReadonlyContext<TState, TComputeds, TQueries>,
-      change: SigmaObserveChange<TState, true>,
-    ) => void,
+    listener: (this: ReadonlyContext<T>, change: SigmaObserveChange<T["state"], true>) => void,
     options: SigmaObserveOptions & { patches: true },
   ): this;
 
@@ -322,19 +250,8 @@ export interface SigmaType<
    * returns a promise, sigma throws so async boundaries stay explicit.
    */
   actions<TNextActions extends object>(
-    actions: TNextActions &
-      ThisType<
-        ActionContext<TState, TEvents, TComputeds, TQueries, MergeObjects<TActions, TNextActions>>
-      >,
-  ): SigmaType<
-    TState,
-    TEvents,
-    TDefaults,
-    TComputeds,
-    TQueries,
-    MergeObjects<TActions, TNextActions>,
-    TSetupArgs
-  >;
+    actions: TNextActions & ThisType<ActionContext<T, { actions: TNextActions }>>,
+  ): SigmaType<MergeSigmaDefinition<T, { actions: TNextActions }>, TDefaults>;
 
   /**
    * Adds an explicit setup handler for side effects and owned resources.
@@ -342,17 +259,12 @@ export interface SigmaType<
    * Every registered handler runs when `instance.setup(...)` is called, and the
    * setup argument list is inferred from the first handler you add.
    */
-  setup<TNextSetupArgs extends [TSetupArgs] extends [never] ? any[] : NonNullable<TSetupArgs>>(
+  setup<
+    TNextSetupArgs extends [T["setupArgs"]] extends [never] ? any[] : NonNullable<T["setupArgs"]>,
+  >(
     setup: (
-      this: SetupContext<{
-        state: TState;
-        events: TEvents;
-        computeds: TComputeds;
-        queries: TQueries;
-        actions: TActions;
-        setupArgs: TNextSetupArgs;
-      }>,
+      this: SetupContext<T, { setupArgs: TNextSetupArgs }>,
       ...args: TNextSetupArgs
     ) => readonly AnyResource[],
-  ): SigmaType<TState, TEvents, TDefaults, TComputeds, TQueries, TActions, TNextSetupArgs>;
+  ): SigmaType<MergeSigmaDefinition<T, { setupArgs: TNextSetupArgs }>, TDefaults>;
 }

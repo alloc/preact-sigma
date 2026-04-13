@@ -45,9 +45,10 @@ export type ComputedValues<TComputeds extends object | undefined> = [undefined] 
     };
 
 export type ComputedContext<
-  TState extends AnyState,
-  TComputeds extends object,
-> = Immutable<TState> & ComputedValues<TComputeds>;
+  T extends SigmaDefinition,
+  TOverrides extends Partial<SigmaDefinition> = {},
+> = Immutable<MergeObjects<T["state"], TOverrides["state"]>> &
+  ComputedValues<MergeObjects<T["computeds"], TOverrides["computeds"]>>;
 
 export type QueryMethods<TQueries extends object | undefined> = [undefined] extends [TQueries]
   ? never
@@ -86,40 +87,36 @@ export type SetupMethods<TSetupArgs extends any[] | undefined> = [TSetupArgs] ex
     };
 
 export type ReadonlyContext<
-  TState extends AnyState,
-  TComputeds extends object,
-  TQueries extends object,
-> = Immutable<TState> & ComputedValues<TComputeds> & QueryMethods<TQueries>;
+  T extends SigmaDefinition,
+  TOverrides extends Partial<SigmaDefinition> = {},
+> = Immutable<MergeObjects<T["state"], TOverrides["state"]>> &
+  ComputedValues<MergeObjects<T["computeds"], TOverrides["computeds"]>> &
+  QueryMethods<MergeObjects<T["queries"], TOverrides["queries"]>>;
 
-export type Emit<TEvents extends AnyEvents> = <TEvent extends string & keyof TEvents>(
-  name: TEvent,
-  ...args: [TEvents[TEvent]] extends [void] ? [] : [payload: TEvents[TEvent]]
-) => void;
+export type Emit<T extends SigmaDefinition, TOverrides extends Partial<SigmaDefinition> = {}> =
+  MergeObjects<T["events"], TOverrides["events"], AnyEvents> extends infer TEvents
+    ? [TEvents] extends [AnyEvents]
+      ? <TEvent extends string & keyof TEvents>(
+          name: TEvent,
+          ...args: [TEvents[TEvent]] extends [void] ? [] : [payload: TEvents[TEvent]]
+        ) => void
+      : never
+    : never;
 
 export type ActionContext<
-  TState extends AnyState,
-  TEvents extends AnyEvents,
-  TComputeds extends object,
-  TQueries extends object,
-  TActions extends object,
-> = Draft<TState> &
-  ComputedValues<TComputeds> &
-  QueryMethods<TQueries> &
-  ActionMethods<TActions> & {
+  T extends SigmaDefinition,
+  TOverrides extends Partial<SigmaDefinition> = {},
+> = Draft<MergeObjects<T["state"], TOverrides["state"]>> &
+  ComputedValues<MergeObjects<T["computeds"], TOverrides["computeds"]>> &
+  QueryMethods<MergeObjects<T["queries"], TOverrides["queries"]>> &
+  ActionMethods<MergeObjects<T["actions"], TOverrides["actions"]>> & {
     /** Publishes the current action draft immediately so later boundaries use committed state. */
     commit(): void;
     /** Emits a typed event from the current action. */
-    emit: Emit<TEvents>;
+    emit: Emit<T, TOverrides>;
   };
 
-type DefinitionEvents<T extends SigmaDefinition> = T["events"] extends AnyEvents ? T["events"] : {};
-type DefinitionComputeds<T extends SigmaDefinition> = T["computeds"] extends object
-  ? T["computeds"]
-  : {};
-type DefinitionQueries<T extends SigmaDefinition> = T["queries"] extends object ? T["queries"] : {};
-type DefinitionActions<T extends SigmaDefinition> = T["actions"] extends object ? T["actions"] : {};
-
-export type AnySigmaType = SigmaType<any, any, any, any, any, any, any>;
+export type AnySigmaType = SigmaType<any, any>;
 
 /** The public shape shared by all sigma-state instances. */
 export interface AnySigmaState extends EventTarget {
@@ -170,6 +167,22 @@ type Simplify<T> = {} & {
   [K in keyof T]: T[K];
 };
 
+export type MergeSigmaDefinition<
+  TLeft extends SigmaDefinition,
+  TRight extends Partial<SigmaDefinition>,
+> = {
+  state: MergeObjects<TLeft["state"], TRight["state"]>;
+  events: MergeObjects<TLeft["events"], TRight["events"]>;
+  computeds: MergeObjects<TLeft["computeds"], TRight["computeds"]>;
+  queries: MergeObjects<TLeft["queries"], TRight["queries"]>;
+  actions: MergeObjects<TLeft["actions"], TRight["actions"]>;
+  setupArgs: TLeft["setupArgs"] extends any[]
+    ? TLeft["setupArgs"]
+    : TRight["setupArgs"] extends any[]
+      ? TRight["setupArgs"]
+      : never;
+};
+
 // This lets an interface type extend InstanceType<typeof SigmaType>.
 type MapSigmaDefinition<T extends SigmaDefinition> = keyof T extends infer K
   ? K extends "state"
@@ -191,26 +204,23 @@ type MapSigmaDefinition<T extends SigmaDefinition> = keyof T extends infer K
 export type SigmaState<T extends SigmaDefinition = SigmaDefinition> = AnySigmaState &
   Simplify<UnionToIntersection<MapSigmaDefinition<T>>>;
 
-export type SetupContext<T extends SigmaDefinition> = SigmaState<T> & {
+export type SetupContext<
+  T extends SigmaDefinition,
+  TOverrides extends Partial<SigmaDefinition> = {},
+> = SigmaState<MergeSigmaDefinition<T, TOverrides>> & {
   /** Runs a synchronous anonymous action from setup so reads and writes use normal action semantics. */
-  act<TResult>(
-    fn: (
-      this: ActionContext<
-        T["state"],
-        DefinitionEvents<T>,
-        DefinitionComputeds<T>,
-        DefinitionQueries<T>,
-        DefinitionActions<T>
-      >,
-    ) => TResult,
-  ): TResult;
+  act<TResult>(fn: (this: ActionContext<T>) => TResult): TResult;
   /** Emits a typed event from setup. */
-  emit: T["events"] extends object ? Emit<T["events"]> : never;
+  emit: Emit<T, TOverrides>;
 };
 
-export type MergeObjects<TLeft extends object, TRight> = [TRight] extends [object]
-  ? Extract<Simplify<Omit<TLeft, keyof TRight> & TRight>, TLeft>
-  : TLeft;
+export type MergeObjects<TLeft, TRight, TConstraint extends object = object> = [TRight] extends [
+  TConstraint,
+]
+  ? [TLeft] extends [TConstraint]
+    ? Extract<Simplify<Omit<TLeft, keyof TRight> & TRight>, TLeft>
+    : TRight
+  : Extract<TLeft, TConstraint>;
 
 type RequiredKeys<TObject extends object> = {
   [K in keyof TObject]-?: {} extends Pick<TObject, K> ? never : K;
