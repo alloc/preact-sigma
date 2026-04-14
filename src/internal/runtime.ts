@@ -18,10 +18,10 @@ export type SigmaTypeInternals = {
   _computeFunctions: Record<string, AnyFunction>;
   _defaultState: Record<string, unknown>;
   _defaultStateKeys: string[];
-  _observeFunctions: AnyFunction[];
+  _observeFunction: AnyFunction | null;
   _patchesEnabled: boolean;
   _queryFunctions: Record<string, AnyFunction>;
-  _setupFunctions: AnyFunction[];
+  _setupFunction: AnyFunction | null;
 };
 
 export type ActionOwner = {
@@ -252,7 +252,7 @@ export function shouldSetup(publicInstance: AnySigmaState): publicInstance is An
   setup(...args: any[]): Cleanup;
 } {
   const instance = getSigmaInternals(publicInstance);
-  return instance.type._setupFunctions.length > 0;
+  return instance.type._setupFunction !== null;
 }
 
 function clearCurrentDraft(owner: ActionOwner) {
@@ -510,9 +510,7 @@ function publishState(instance: SigmaInternals, finalized: FinalizedDraftResult)
     }
   });
 
-  for (const observer of instance.type._observeFunctions) {
-    observer.call(getContext(instance, "observe"), finalized);
-  }
+  instance.type._observeFunction?.call(getContext(instance, "observe"), finalized);
 }
 
 /**
@@ -595,7 +593,7 @@ async function resolveAsyncActionResult(owner: ActionOwner, result: PromiseLike<
 export class Sigma extends EventTarget {
   setup(...args: any[]): Cleanup {
     const instance = getSigmaInternals(this);
-    if (!instance.type._setupFunctions.length) {
+    if (!instance.type._setupFunction) {
       throw new Error("[preact-sigma] Setup is undefined for this sigma state");
     }
     if (instance.disposed) {
@@ -604,13 +602,10 @@ export class Sigma extends EventTarget {
     instance.currentSetupCleanup?.();
     instance.currentSetupCleanup = undefined;
 
-    const resources = instance.type._setupFunctions.flatMap((setup) => {
-      const result = setup.apply(getContext(instance, "setup"), args);
-      if (!Array.isArray(result)) {
-        throw new Error("[preact-sigma] Sigma setup handlers must return an array");
-      }
-      return result;
-    });
+    const resources = instance.type._setupFunction.apply(getContext(instance, "setup"), args);
+    if (!Array.isArray(resources)) {
+      throw new Error("[preact-sigma] Sigma setup handlers must return an array");
+    }
 
     let cleanup: Cleanup;
     if (resources.length) {

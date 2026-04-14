@@ -86,10 +86,10 @@ export class SigmaType<
         static _computeFunctions: Record<string, AnyFunction> = Object.create(null);
         static _defaultState: Record<string, unknown> = Object.create(null);
         static _defaultStateKeys: string[] = [];
-        static _observeFunctions: AnyFunction[] = [];
+        static _observeFunction: AnyFunction | null = null;
         static _patchesEnabled: boolean = false;
         static _queryFunctions: Record<string, AnyFunction> = Object.create(null);
-        static _setupFunctions: AnyFunction[] = [];
+        static _setupFunction: AnyFunction | null = null;
 
         constructor(initialState?: AnyState) {
           super();
@@ -192,7 +192,7 @@ export class SigmaType<
     options?: SigmaObserveOptions & { patches?: boolean },
   ) {
     const type = getTypeInternals(this);
-    type._observeFunctions.push(listener);
+    type._observeFunction = listener;
     if (options?.patches) {
       type._patchesEnabled = true;
     }
@@ -239,7 +239,7 @@ export class SigmaType<
     ) => readonly AnyResource[],
   ): ExtendSigmaType<this, { setupArgs: TSetupArgs }> {
     const type = getTypeInternals(this);
-    type._setupFunctions.push(setup);
+    type._setupFunction = setup;
     return this as any;
   }
 }

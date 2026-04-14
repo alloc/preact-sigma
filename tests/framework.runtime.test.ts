@@ -235,14 +235,12 @@ test("setup returns a single cleanup that owns nested resources", () => {
     })
     .setup(function () {
       const child = new ChildState();
-      return [child.setup()];
-    })
-    .setup(function () {
       const stop = listen(target, "sigma-v2-ping", () => {
         observedEvents.push("ping");
       });
 
       return [
+        child.setup(),
         stop,
         abortController,
         () => {
