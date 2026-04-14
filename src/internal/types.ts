@@ -1,5 +1,6 @@
 import type { ReadonlySignal } from "@preact/signals";
 import type { Patch } from "immer";
+import { EventParameters } from "src/listener.js";
 import type { SigmaType } from "../framework.js";
 import type { Draft, Immutable } from "../immer.js";
 import { sigmaEventsBrand, sigmaRefBrand, sigmaStateBrand } from "./symbols.js";
@@ -73,9 +74,7 @@ export type EventMethods<TEvents extends AnyEvents | undefined> = [undefined] ex
       /** Registers a typed event listener and returns an unsubscribe function. */
       on<TEvent extends string & keyof TEvents>(
         name: TEvent,
-        listener: [TEvents[TEvent]] extends [void]
-          ? () => void
-          : (payload: TEvents[TEvent]) => void,
+        listener: (...[detail]: EventParameters<TEvents[TEvent]>) => void,
       ): Cleanup;
     };
 
@@ -98,7 +97,7 @@ export type Emit<T extends SigmaDefinition, TOverrides extends Partial<SigmaDefi
     ? [TEvents] extends [AnyEvents]
       ? <TEvent extends string & keyof TEvents>(
           name: TEvent,
-          ...args: [TEvents[TEvent]] extends [void] ? [] : [payload: TEvents[TEvent]]
+          ...[detail]: EventParameters<TEvents[TEvent]>
         ) => void
       : never
     : never;

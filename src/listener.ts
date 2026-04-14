@@ -51,6 +51,13 @@ export type InferEventType<TTarget extends EventTarget> =
   | (InferListener<TTarget> extends { __eventType?: infer TEvent } ? string & TEvent : never)
   | (string & {});
 
+/** Infers the detail parameter for a typed emit. */
+export type EventParameters<T> = [void] extends [T]
+  ? [detail?: T extends void ? undefined : T]
+  : [undefined] extends [T]
+    ? [detail?: T]
+    : [detail: T];
+
 /**
  * A standalone typed event hub with `emit(...)` and `on(...)` methods and full
  * `EventTarget`, `listen(...)`, and `useListener(...)` compatibility.
@@ -66,11 +73,9 @@ export class SigmaTarget<TEvents extends AnyEvents = {}> extends EventTarget {
    */
   emit<TEvent extends string & keyof TEvents>(
     name: TEvent,
-    ...args: [TEvents[TEvent]] extends [void] ? [] : [payload: TEvents[TEvent]]
+    ...[detail]: EventParameters<TEvents[TEvent]>
   ) {
-    this.dispatchEvent(
-      args.length === 0 ? new Event(name) : new CustomEvent(name, { detail: args[0] }),
-    );
+    this.dispatchEvent(detail === undefined ? new Event(name) : new CustomEvent(name, { detail }));
   }
 
   /**
