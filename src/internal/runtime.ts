@@ -14,14 +14,14 @@ import type {
 } from "./types.js";
 
 export type SigmaTypeInternals = {
-  actionFunctions: Record<string, AnyFunction>;
-  computeFunctions: Record<string, AnyFunction>;
-  defaultState: Record<string, unknown>;
-  defaultStateKeys: string[];
-  observeFunctions: AnyFunction[];
-  patchesEnabled: boolean;
-  queryFunctions: Record<string, AnyFunction>;
-  setupFunctions: AnyFunction[];
+  _actionFunctions: Record<string, AnyFunction>;
+  _computeFunctions: Record<string, AnyFunction>;
+  _defaultState: Record<string, unknown>;
+  _defaultStateKeys: string[];
+  _observeFunctions: AnyFunction[];
+  _patchesEnabled: boolean;
+  _queryFunctions: Record<string, AnyFunction>;
+  _setupFunctions: AnyFunction[];
 };
 
 export type ActionOwner = {
@@ -101,7 +101,7 @@ export function initializeSigmaInstance(
   type: SigmaTypeInternals,
   initialState: AnyState | undefined,
 ) {
-  const stateKeys = new Set(type.defaultStateKeys);
+  const stateKeys = new Set(type._defaultStateKeys);
   if (initialState) {
     for (const key in initialState) {
       stateKeys.add(key);
@@ -123,9 +123,9 @@ export function initializeSigmaInstance(
     let value = initialState?.[key];
     if (value === undefined) {
       value =
-        typeof type.defaultState[key] === "function"
-          ? type.defaultState[key].call(undefined)
-          : type.defaultState[key];
+        typeof type._defaultState[key] === "function"
+          ? type._defaultState[key].call(undefined)
+          : type._defaultState[key];
     }
     const container = signal(value);
     Object.defineProperty(publicInstance, signalPrefix + key, {
@@ -136,10 +136,10 @@ export function initializeSigmaInstance(
       enumerable: true,
     });
   }
-  for (const key in type.computeFunctions) {
+  for (const key in type._computeFunctions) {
     Object.defineProperty(publicInstance, signalPrefix + key, {
       value: computed(() =>
-        type.computeFunctions[key].call(getContext(instance, "computedReadonly")),
+        type._computeFunctions[key].call(getContext(instance, "computedReadonly")),
       ),
     });
   }
@@ -184,7 +184,7 @@ export function readActionStateValue(owner: ActionOwner, key: string, options: C
 }
 
 export function readActionComputedValue(owner: ActionOwner, key: string) {
-  return owner.instance.type.computeFunctions[key].call(getContext(owner, "computedDraftAware"));
+  return owner.instance.type._computeFunctions[key].call(getContext(owner, "computedDraftAware"));
 }
 
 export function setActionStateValue(owner: ActionOwner, key: string, value: unknown) {
@@ -240,9 +240,9 @@ export function assertDefinitionKeyAvailable(
     throw new Error(`[preact-sigma] Reserved property name: ${key}`);
   }
   if (
-    key in builder.computeFunctions ||
-    key in builder.queryFunctions ||
-    key in builder.actionFunctions
+    key in builder._computeFunctions ||
+    key in builder._queryFunctions ||
+    key in builder._actionFunctions
   ) {
     throw new Error(`[preact-sigma] Duplicate key for ${kind}: ${key}`);
   }
@@ -252,7 +252,7 @@ export function shouldSetup(publicInstance: AnySigmaState): publicInstance is An
   setup(...args: any[]): Cleanup;
 } {
   const instance = getSigmaInternals(publicInstance);
-  return instance.type.setupFunctions.length > 0;
+  return instance.type._setupFunctions.length > 0;
 }
 
 function clearCurrentDraft(owner: ActionOwner) {
@@ -445,7 +445,7 @@ function finalizeOwnerDraft(owner: ActionOwner): FinalizedDraftResult | undefine
   let patches: Patch[] | undefined;
   let inversePatches: Patch[] | undefined;
 
-  const newState = owner.instance.type.patchesEnabled
+  const newState = owner.instance.type._patchesEnabled
     ? immer.finishDraft(currentDraft, (nextPatches, nextInversePatches) => {
         patches = nextPatches;
         inversePatches = nextInversePatches;
@@ -474,7 +474,7 @@ function finalizeReplacementState(
   let patches: Patch[] | undefined;
   let inversePatches: Patch[] | undefined;
 
-  const newState = instance.type.patchesEnabled
+  const newState = instance.type._patchesEnabled
     ? immer.finishDraft(draft, (nextPatches, nextInversePatches) => {
         patches = nextPatches;
         inversePatches = nextInversePatches;
@@ -510,7 +510,7 @@ function publishState(instance: SigmaInternals, finalized: FinalizedDraftResult)
     }
   });
 
-  for (const observer of instance.type.observeFunctions) {
+  for (const observer of instance.type._observeFunctions) {
     observer.call(getContext(instance, "observe"), finalized);
   }
 }
@@ -595,7 +595,7 @@ async function resolveAsyncActionResult(owner: ActionOwner, result: PromiseLike<
 export class Sigma extends EventTarget {
   setup(...args: any[]): Cleanup {
     const instance = getSigmaInternals(this);
-    if (!instance.type.setupFunctions.length) {
+    if (!instance.type._setupFunctions.length) {
       throw new Error("[preact-sigma] Setup is undefined for this sigma state");
     }
     if (instance.disposed) {
@@ -604,7 +604,7 @@ export class Sigma extends EventTarget {
     instance.currentSetupCleanup?.();
     instance.currentSetupCleanup = undefined;
 
-    const resources = instance.type.setupFunctions.flatMap((setup) => {
+    const resources = instance.type._setupFunctions.flatMap((setup) => {
       const result = setup.apply(getContext(instance, "setup"), args);
       if (!Array.isArray(result)) {
         throw new Error("[preact-sigma] Sigma setup handlers must return an array");

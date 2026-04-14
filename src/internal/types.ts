@@ -29,7 +29,7 @@ export type AnyEvents = Record<string, object | void>;
 export type AnyState = Record<string, unknown>;
 
 /** The object accepted by `.defaultState(...)`, where each property may be a value or a zero-argument initializer. */
-export type AnyDefaultState<TState extends AnyState> = {
+export type AnyDefaultState<TState extends object> = {
   [K in keyof TState]?: DefaultStateValue<TState[K]>;
 };
 

@@ -177,17 +177,17 @@ function createContext(
         const signal = getSignal(instance, key);
         return options.reactiveReads ? signal.value : signal.peek();
       }
-      if (key in instance.type.computeFunctions) {
+      if (key in instance.type._computeFunctions) {
         if (owner && options.liveComputeds) {
           return readActionComputedValue(owner, key);
         }
         const signal = getSignal(instance, key);
         return options.reactiveReads ? signal.value : signal.peek();
       }
-      if (options.allowQueries && key in instance.type.queryFunctions) {
+      if (options.allowQueries && key in instance.type._queryFunctions) {
         return Reflect.get(instance.publicInstance, key);
       }
-      if (options.allowActions && key in instance.type.actionFunctions) {
+      if (options.allowActions && key in instance.type._actionFunctions) {
         return Reflect.get(instance.publicInstance, key);
       }
       if (Reflect.has(publicPrototype, key)) {

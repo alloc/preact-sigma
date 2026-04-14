@@ -5,16 +5,16 @@ import {
   buildQueryMethod,
   initializeSigmaInstance,
   Sigma,
-  type SigmaTypeInternals,
+  SigmaTypeInternals,
 } from "./internal/runtime.js";
 import { sigmaStateBrand, signalPrefix } from "./internal/symbols.js";
 import type {
   ActionContext,
   AnyDefaultState,
+  AnyEvents,
   AnyFunction,
   AnyResource,
   AnySigmaState,
-  AnySigmaType,
   AnyState,
   ComputedContext,
   InitialStateInput,
@@ -63,113 +63,154 @@ export function query<TArgs extends any[], TResult>(fn: (this: void, ...args: TA
   return ((...args: TArgs) => computed(() => fn(...args)).value) as typeof fn;
 }
 
-/**
- * Builds sigma-state constructors by accumulating default state, computeds,
- * queries, observers, actions, and setup handlers.
- *
- * State and event inference starts from `new SigmaType<TState, TEvents>()`.
- * Later builder methods infer names and types from the objects you pass to them.
- */
 // oxlint-disable-next-line typescript/no-unsafe-declaration-merging
-export class SigmaType<
-  T extends SigmaDefinition = SigmaDefinition,
+export abstract class SigmaTypeBuilder<
+  T extends SigmaDefinition,
   TDefaults extends AnyDefaultState<Extract<T["state"], object>> = {},
 > extends Function {
-  constructor(name: string = "Sigma") {
-    super();
-
-    const type: SigmaTypeInternals = {
-      actionFunctions: Object.create(null),
-      computeFunctions: Object.create(null),
-      defaultState: Object.create(null),
-      defaultStateKeys: [],
-      observeFunctions: [],
-      patchesEnabled: false,
-      queryFunctions: Object.create(null),
-      setupFunctions: [],
-    };
-
-    const { [name]: SigmaTypeBuilder } = {
-      [name]: class extends Sigma {
-        constructor(initialState?: AnyState) {
-          super();
-          initializeSigmaInstance(this, type, initialState);
-        }
-      },
-    } as unknown as {
-      [name: string]: AnySigmaType;
-    };
-
-    SigmaTypeBuilder.defaultState = function (defaultState) {
-      for (const key in defaultState) {
-        if (defaultState[key] === undefined) {
-          continue;
-        }
-        type.defaultState[key] = defaultState[key];
-        type.defaultStateKeys.push(key);
+  /**
+   * Adds top-level public state and default values to the builder.
+   *
+   * Each property becomes a reactive public state property on instances. Use a
+   * zero-argument function when each instance needs a fresh object or array.
+   */
+  defaultState<TNextDefaults extends AnyDefaultState<T["state"]>>(
+    defaultState: TNextDefaults,
+  ): SigmaTypeBuilder<T, MergeObjects<TDefaults, TNextDefaults>> {
+    const type = getTypeInternals(this);
+    for (const key in defaultState) {
+      if (defaultState[key] === undefined) {
+        continue;
       }
-      return this;
-    };
+      type._defaultState[key] = defaultState[key];
+      type._defaultStateKeys.push(key);
+    }
+    return this as SigmaTypeBuilder<any, any>;
+  }
 
-    SigmaTypeBuilder.computed = function (computeFunctions) {
-      for (const key in computeFunctions) {
-        assertDefinitionKeyAvailable(type, key, "computed");
-        type.computeFunctions[key] = computeFunctions[key] as AnyFunction;
+  /**
+   * Adds reactive getter properties for derived values that take no arguments.
+   *
+   * Computed names and return types are inferred from the object you pass.
+   * `this` exposes readonly state plus computeds that are already on the builder.
+   */
+  computed<TNextComputeds extends object>(
+    computeds: TNextComputeds & ThisType<ComputedContext<T, { computeds: TNextComputeds }>>,
+  ): SigmaTypeBuilder<MergeSigmaDefinition<T, { computeds: TNextComputeds }>, TDefaults> {
+    const type = getTypeInternals(this);
+    for (const key in computeds) {
+      assertDefinitionKeyAvailable(type, key, "computed");
+      type._computeFunctions[key] = computeds[key] as AnyFunction;
 
-        Object.defineProperty(this.prototype, key, {
-          get: function (this: any) {
-            return this[signalPrefix + key].value;
-          },
-        });
-      }
-      return this;
-    };
+      Object.defineProperty(this.prototype, key, {
+        get: function (this: any) {
+          return this[signalPrefix + key].value;
+        },
+      });
+    }
+    return this as SigmaTypeBuilder<any, any>;
+  }
 
-    SigmaTypeBuilder.queries = function (queryFunctions) {
-      for (const key in queryFunctions) {
-        assertDefinitionKeyAvailable(type, key, "query");
-        const queryFunction = queryFunctions[key] as AnyFunction;
-        type.queryFunctions[key] = queryFunction;
+  /**
+   * Adds reactive read methods that accept arguments.
+   *
+   * Query names, parameters, and return types are inferred from the object you
+   * pass. Each call tracks reactively at the call site and does not memoize
+   * results across invocations.
+   */
+  queries<TNextQueries extends object>(
+    queries: TNextQueries & ThisType<ReadonlyContext<T, { queries: TNextQueries }>>,
+  ): SigmaTypeBuilder<MergeSigmaDefinition<T, { queries: TNextQueries }>, TDefaults> {
+    const type = getTypeInternals(this);
+    for (const key in queries) {
+      assertDefinitionKeyAvailable(type, key, "query");
+      const queryFunction = queries[key] as AnyFunction;
+      type._queryFunctions[key] = queryFunction;
 
-        Object.defineProperty(this.prototype, key, {
-          value: buildQueryMethod(queryFunction),
-        });
-      }
-      return this;
-    };
+      Object.defineProperty(this.prototype, key, {
+        value: buildQueryMethod(queryFunction),
+      });
+    }
+    return this as SigmaTypeBuilder<any, any>;
+  }
 
-    SigmaTypeBuilder.observe = function (listener, options) {
-      type.observeFunctions.push(listener);
-      if (options?.patches) {
-        type.patchesEnabled = true;
-      }
-      return this;
-    };
+  /**
+   * Adds a committed-state observer.
+   *
+   * Observers run after successful publishes and can opt into Immer patches
+   * with `{ patches: true }`.
+   */
+  observe(
+    listener: (this: ReadonlyContext<T>, change: SigmaObserveChange<T["state"]>) => void,
+    options?: SigmaObserveOptions & { patches?: false | undefined },
+  ): this;
 
-    SigmaTypeBuilder.actions = function (actionFunctions) {
-      for (const key in actionFunctions) {
-        assertDefinitionKeyAvailable(type, key, "action");
-        const actionFunction = actionFunctions[key] as AnyFunction;
-        type.actionFunctions[key] = actionFunction;
+  observe(
+    listener: (this: ReadonlyContext<T>, change: SigmaObserveChange<T["state"], true>) => void,
+    options: SigmaObserveOptions & { patches: true },
+  ): this;
 
-        Object.defineProperty(this.prototype, key, {
-          value: buildActionMethod(key, actionFunction),
-        });
-      }
-      return this;
-    };
+  observe(
+    listener: (this: any, change: any) => void,
+    options?: SigmaObserveOptions & { patches?: boolean },
+  ) {
+    const type = getTypeInternals(this);
+    type._observeFunctions.push(listener);
+    if (options?.patches) {
+      type._patchesEnabled = true;
+    }
+    return this;
+  }
 
-    SigmaTypeBuilder.setup = function (setup) {
-      type.setupFunctions.push(setup);
-      return this;
-    };
+  /**
+   * Adds action methods whose `this` receives draft state, typed events, `commit()`,
+   * and the computeds, queries, and actions already defined on the builder.
+   *
+   * Actions create drafts lazily as they need them. Sync actions on the same
+   * instance reuse the current draft, so they can compose and publish once when
+   * the outer action returns. Declared async actions publish their initial
+   * synchronous work on return, then require `this.commit()` to publish later
+   * writes made after `await`. Non-async actions stay synchronous; if one
+   * returns a promise, sigma throws so async boundaries stay explicit.
+   */
+  actions<TNextActions extends object>(
+    actions: TNextActions & ThisType<ActionContext<T, { actions: TNextActions }>>,
+  ): SigmaTypeBuilder<MergeSigmaDefinition<T, { actions: TNextActions }>, TDefaults> {
+    const type = getTypeInternals(this);
+    for (const key in actions) {
+      assertDefinitionKeyAvailable(type, key, "action");
+      const actionFunction = actions[key] as AnyFunction;
+      type._actionFunctions[key] = actionFunction;
 
-    return SigmaTypeBuilder as SigmaType<T, TDefaults>;
+      Object.defineProperty((this as any).prototype, key, {
+        value: buildActionMethod(key, actionFunction),
+      });
+    }
+    return this as SigmaTypeBuilder<any, any>;
+  }
+
+  /**
+   * Adds an explicit setup handler for side effects and owned resources.
+   *
+   * Every registered handler runs when `instance.setup(...)` is called, and the
+   * setup argument list is inferred from the first handler you add.
+   */
+  setup<
+    TNextSetupArgs extends [T["setupArgs"]] extends [never] ? any[] : NonNullable<T["setupArgs"]>,
+  >(
+    setup: (
+      this: SetupContext<T, { setupArgs: TNextSetupArgs }>,
+      ...args: TNextSetupArgs
+    ) => readonly AnyResource[],
+  ): SigmaTypeBuilder<MergeSigmaDefinition<T, { setupArgs: TNextSetupArgs }>, TDefaults> {
+    const type = getTypeInternals(this);
+    type._setupFunctions.push(setup);
+    return this as SigmaTypeBuilder<any, any>;
   }
 }
 
 /** The constructor shape exposed by a configured sigma type. */
-export interface SigmaType<
+export interface SigmaTypeBuilder<
   T extends SigmaDefinition,
   TDefaults extends AnyDefaultState<Extract<T["state"], object>>,
 > {
@@ -190,81 +231,47 @@ export interface SigmaType<
    * generics on `new SigmaType<TState, TEvents>()` plus the later builder inputs.
    */
   get Instance(): SigmaState<Extract<OmitEmpty<T>, SigmaDefinition>>;
+}
 
-  /**
-   * Adds top-level public state and default values to the builder.
-   *
-   * Each property becomes a reactive public state property on instances. Use a
-   * zero-argument function when each instance needs a fresh object or array.
-   */
-  defaultState<TNextDefaults extends AnyDefaultState<T["state"]>>(
-    defaultState: TNextDefaults,
-  ): SigmaType<T, MergeObjects<TDefaults, TNextDefaults>>;
+/**
+ * Builds sigma-state constructors by accumulating default state, computeds,
+ * queries, observers, actions, and setup handlers.
+ *
+ * State and event inference starts from `new SigmaType<TState, TEvents>()`.
+ * Later builder methods infer names and types from the objects you pass to them.
+ */
+export class SigmaType<
+  TState extends AnyState,
+  TEvents extends AnyEvents = {},
+> extends SigmaTypeBuilder<{ state: TState; events: TEvents }> {
+  constructor(name: string = "Sigma") {
+    super();
 
-  /**
-   * Adds reactive getter properties for derived values that take no arguments.
-   *
-   * Computed names and return types are inferred from the object you pass.
-   * `this` exposes readonly state plus computeds that are already on the builder.
-   */
-  computed<TNextComputeds extends object>(
-    computeds: TNextComputeds & ThisType<ComputedContext<T, { computeds: TNextComputeds }>>,
-  ): SigmaType<MergeSigmaDefinition<T, { computeds: TNextComputeds }>, TDefaults>;
+    const { [name]: type } = {
+      [name]: class extends Sigma {
+        static _actionFunctions: Record<string, AnyFunction> = Object.create(null);
+        static _computeFunctions: Record<string, AnyFunction> = Object.create(null);
+        static _defaultState: Record<string, unknown> = Object.create(null);
+        static _defaultStateKeys: string[] = [];
+        static _observeFunctions: AnyFunction[] = [];
+        static _patchesEnabled: boolean = false;
+        static _queryFunctions: Record<string, AnyFunction> = Object.create(null);
+        static _setupFunctions: AnyFunction[] = [];
 
-  /**
-   * Adds reactive read methods that accept arguments.
-   *
-   * Query names, parameters, and return types are inferred from the object you
-   * pass. Each call tracks reactively at the call site and does not memoize
-   * results across invocations.
-   */
-  queries<TNextQueries extends object>(
-    queries: TNextQueries & ThisType<ReadonlyContext<T, { queries: TNextQueries }>>,
-  ): SigmaType<MergeSigmaDefinition<T, { queries: TNextQueries }>, TDefaults>;
+        constructor(initialState?: AnyState) {
+          super();
+          initializeSigmaInstance(this, type, initialState);
+        }
+      },
+    } satisfies {
+      [name: string]: SigmaTypeInternals;
+    };
 
-  /**
-   * Adds a committed-state observer.
-   *
-   * Observers run after successful publishes and can opt into Immer patches
-   * with `{ patches: true }`.
-   */
-  observe(
-    listener: (this: ReadonlyContext<T>, change: SigmaObserveChange<T["state"]>) => void,
-    options?: SigmaObserveOptions & { patches?: false | undefined },
-  ): this;
+    Object.setPrototypeOf(type, SigmaType.prototype);
+    return type as unknown as SigmaType<TState, TEvents>;
+  }
+}
 
-  observe(
-    listener: (this: ReadonlyContext<T>, change: SigmaObserveChange<T["state"], true>) => void,
-    options: SigmaObserveOptions & { patches: true },
-  ): this;
-
-  /**
-   * Adds action methods whose `this` receives draft state, typed events, `commit()`,
-   * and the computeds, queries, and actions already defined on the builder.
-   *
-   * Actions create drafts lazily as they need them. Sync actions on the same
-   * instance reuse the current draft, so they can compose and publish once when
-   * the outer action returns. Declared async actions publish their initial
-   * synchronous work on return, then require `this.commit()` to publish later
-   * writes made after `await`. Non-async actions stay synchronous; if one
-   * returns a promise, sigma throws so async boundaries stay explicit.
-   */
-  actions<TNextActions extends object>(
-    actions: TNextActions & ThisType<ActionContext<T, { actions: TNextActions }>>,
-  ): SigmaType<MergeSigmaDefinition<T, { actions: TNextActions }>, TDefaults>;
-
-  /**
-   * Adds an explicit setup handler for side effects and owned resources.
-   *
-   * Every registered handler runs when `instance.setup(...)` is called, and the
-   * setup argument list is inferred from the first handler you add.
-   */
-  setup<
-    TNextSetupArgs extends [T["setupArgs"]] extends [never] ? any[] : NonNullable<T["setupArgs"]>,
-  >(
-    setup: (
-      this: SetupContext<T, { setupArgs: TNextSetupArgs }>,
-      ...args: TNextSetupArgs
-    ) => readonly AnyResource[],
-  ): SigmaType<MergeSigmaDefinition<T, { setupArgs: TNextSetupArgs }>, TDefaults>;
+function getTypeInternals(type: SigmaTypeBuilder<any, any>): SigmaTypeInternals {
+  return type as unknown as SigmaTypeInternals;
 }
