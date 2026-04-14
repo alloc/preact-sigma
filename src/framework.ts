@@ -28,8 +28,6 @@ import type {
   SigmaState,
 } from "./internal/types.js";
 
-export { action, batch, computed, effect, untracked } from "@preact/signals";
-export { freeze, immerable, type Immutable } from "immer";
 export { replaceState, setAutoFreeze, snapshot } from "./internal/runtime.js";
 
 export type {
