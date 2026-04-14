@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## v4.0.0
+
+### Breaking Changes
+
+- **Peer Dependencies:** `preact`, `@preact/signals`, and `immer` are now peer dependencies instead of direct dependencies. You must ensure they are installed in your project alongside `preact-sigma`.
+
 ## v3.0.0
 
 ### Breaking Changes
