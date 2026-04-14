@@ -7,7 +7,7 @@
 ## Installation
 
 ```bash
-npm install preact-sigma
+npm install preact-sigma @preact/signals immer preact
 ```
 
 ## Quick Example
