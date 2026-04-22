@@ -1,15 +1,14 @@
-import { sigma } from "./internal/runtime.js";
 import type { Immutable } from "./immer.js";
-import type { InferSigmaStateDefinition, SigmaDefinition, SigmaState } from "./internal/types.js";
+import { sigma } from "./internal/runtime.js";
+import type { SigmaDefinition, SigmaState } from "./internal/types.js";
 
 type MaybePromise<T> = T | Promise<T>;
-type SnapshotOf<T extends SigmaState<any>> =
-  T extends SigmaState<infer TDefinition extends SigmaDefinition>
-    ? Immutable<TDefinition["state"]>
-    : never;
+
 type MutableObject<T extends object> = {
   -readonly [K in keyof T]: T[K];
 };
+
+type Snapshot<T extends SigmaDefinition> = Immutable<T["state"]>;
 
 type CodecContext<TState extends object> = {
   key: string;
@@ -49,24 +48,26 @@ export interface PersistCodec<TState extends object, TStored = TState> {
 export type PersistSchedule = "immediate" | "microtask" | { debounceMs: number };
 
 /** Options shared by restore and persistence helpers. */
-export interface PersistOptions<T extends SigmaState<any>, TStored = SnapshotOf<T>> {
+export interface PersistOptions<T extends SigmaDefinition, TStored = Snapshot<T>> {
   key: string;
   store: PersistStore<PersistRecord<TStored>>;
-  codec?: PersistCodec<SnapshotOf<T>, TStored>;
+  codec?: PersistCodec<Snapshot<T>, TStored>;
   schedule?: PersistSchedule;
   writeInitial?: boolean;
   onWriteError?: (
     error: unknown,
     context: {
-      instance: T;
+      instance: SigmaState<T>;
       key: string;
     },
   ) => void;
 }
 
 /** Options that require a synchronous store. */
-export interface SyncPersistOptions<T extends SigmaState<any>, TStored = SnapshotOf<T>>
-  extends PersistOptions<T, TStored> {
+export interface SyncPersistOptions<
+  T extends SigmaDefinition,
+  TStored = Snapshot<T>,
+> extends PersistOptions<T, TStored> {
   store: SyncPersistStore<PersistRecord<TStored>>;
 }
 
@@ -108,33 +109,33 @@ function createIdentityCodec<TState extends object>(): PersistCodec<TState, TSta
   };
 }
 
-function getCodec<T extends SigmaState<any>, TStored>(
+function getCodec<T extends SigmaDefinition, TStored>(
   options: PersistOptions<T, TStored>,
-): PersistCodec<SnapshotOf<T>, TStored> {
-  return (options.codec ?? createIdentityCodec<SnapshotOf<T>>()) as PersistCodec<
-    SnapshotOf<T>,
+): PersistCodec<Snapshot<T>, TStored> {
+  return (options.codec ?? createIdentityCodec<Snapshot<T>>()) as PersistCodec<
+    Snapshot<T>,
     TStored
   >;
 }
 
-function applyRecord<T extends SigmaState<any>, TStored>(
-  instance: T,
+function applyRecord<T extends SigmaDefinition, TStored>(
+  instance: SigmaState<T>,
   key: string,
   record: PersistRecord<TStored> | undefined,
-  codec: PersistCodec<SnapshotOf<T>, TStored>,
+  codec: PersistCodec<Snapshot<T>, TStored>,
 ): RestoreResult {
   if (!record) {
     return { status: "missing" };
   }
 
-  const baseState = sigma.getState(instance) as SnapshotOf<T>;
+  const baseState = sigma.getState(instance);
   const nextState = codec.decode(record.value, {
     baseState,
     key,
     storedVersion: record.version,
   });
 
-  sigma.replaceState(instance, nextState as Immutable<InferSigmaStateDefinition<T>["state"]>);
+  sigma.replaceState(instance, nextState);
 
   return {
     status: "restored",
@@ -151,8 +152,8 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return prototype === Object.prototype || prototype === null;
 }
 
-export async function restoreState<T extends SigmaState<any>, TStored = SnapshotOf<T>>(
-  instance: T,
+export async function restoreState<T extends SigmaDefinition, TStored = Snapshot<T>>(
+  instance: SigmaState<T>,
   options: PersistOptions<T, TStored>,
 ): Promise<RestoreResult> {
   const codec = getCodec(options);
@@ -161,8 +162,8 @@ export async function restoreState<T extends SigmaState<any>, TStored = Snapshot
 }
 
 /** Restores committed state from a persisted record through a sync store. */
-export function restoreStateSync<T extends SigmaState<any>, TStored = SnapshotOf<T>>(
-  instance: T,
+export function restoreStateSync<T extends SigmaDefinition, TStored = Snapshot<T>>(
+  instance: SigmaState<T>,
   options: SyncPersistOptions<T, TStored>,
 ): RestoreResult {
   const codec = getCodec(options);
@@ -203,8 +204,8 @@ export function pickStateCodec<TState extends object, TKey extends keyof TState>
 }
 
 /** Persists future committed state changes for one sigma-state instance. */
-export function persistState<T extends SigmaState<any>, TStored = SnapshotOf<T>>(
-  instance: T,
+export function persistState<T extends SigmaDefinition, TStored = Snapshot<T>>(
+  instance: SigmaState<T>,
   options: PersistOptions<T, TStored>,
 ): PersistenceHandle {
   const codec = getCodec(options);
@@ -214,7 +215,7 @@ export function persistState<T extends SigmaState<any>, TStored = SnapshotOf<T>>
   let stopped = false;
   let suspended = false;
   let hasPendingState = false;
-  let pendingState: SnapshotOf<T> | undefined;
+  let pendingState: Snapshot<T> | undefined;
   let microtaskScheduled = false;
   let debounceTimer: ReturnType<typeof setTimeout> | undefined;
   let runningWrite: Promise<void> | undefined;
@@ -228,7 +229,7 @@ export function persistState<T extends SigmaState<any>, TStored = SnapshotOf<T>>
     }
   };
 
-  const createRecord = (state: SnapshotOf<T>): PersistRecord<TStored> => ({
+  const createRecord = (state: Snapshot<T>): PersistRecord<TStored> => ({
     version: codec.version,
     savedAt: Date.now(),
     value: codec.encode(state),
@@ -286,7 +287,7 @@ export function persistState<T extends SigmaState<any>, TStored = SnapshotOf<T>>
   };
 
   const queueStateWrite = () => {
-    pendingState = sigma.getState(instance) as SnapshotOf<T>;
+    pendingState = sigma.getState(instance);
     hasPendingState = true;
     scheduleWrite();
   };
@@ -299,7 +300,7 @@ export function persistState<T extends SigmaState<any>, TStored = SnapshotOf<T>>
     cancelScheduledWrite();
     runningWrite = (async () => {
       while (hasPendingState && !stopped && !suspended) {
-        const state = pendingState as SnapshotOf<T>;
+        const state = pendingState!;
         hasPendingState = false;
         await options.store.write(key, createRecord(state));
       }
@@ -315,9 +316,7 @@ export function persistState<T extends SigmaState<any>, TStored = SnapshotOf<T>>
     }
   }
 
-  const stopSubscription = sigma.subscribe(instance, () => {
-    queueStateWrite();
-  });
+  const stopSubscription = sigma.subscribe(instance, queueStateWrite);
 
   if (options.writeInitial) {
     queueStateWrite();
@@ -368,8 +367,8 @@ export function persistState<T extends SigmaState<any>, TStored = SnapshotOf<T>>
 }
 
 /** Restores state, then begins persisting future committed changes. */
-export function bindPersistence<T extends SigmaState<any>, TStored = SnapshotOf<T>>(
-  instance: T,
+export function bindPersistence<T extends SigmaDefinition, TStored = Snapshot<T>>(
+  instance: SigmaState<T>,
   options: PersistOptions<T, TStored>,
 ): BoundPersistence {
   let stopped = false;
@@ -426,8 +425,8 @@ export function bindPersistence<T extends SigmaState<any>, TStored = SnapshotOf<
 }
 
 /** Restores state synchronously, then begins persisting future committed changes. */
-export function bindPersistenceSync<T extends SigmaState<any>, TStored = SnapshotOf<T>>(
-  instance: T,
+export function bindPersistenceSync<T extends SigmaDefinition, TStored = Snapshot<T>>(
+  instance: SigmaState<T>,
   options: SyncPersistOptions<T, TStored>,
 ): SyncBoundPersistence {
   const restored = restoreStateSync(instance, options);

@@ -11,7 +11,6 @@ import {
 } from "./symbols.js";
 
 type Def = typeof sigmaTypeBrand;
-declare const sigmaDefinitionBrand: unique symbol;
 
 export type AnyFunction = (...args: any[]) => any;
 
@@ -211,9 +210,7 @@ export type SigmaState<T extends SigmaDefinition = SigmaDefinition> = AnySigmaSt
       ActionMethods<T["actions"]> &
       EventMetadata<T["events"]> &
       SetupMethods<T["setupArgs"]>
-  > & {
-    readonly [sigmaDefinitionBrand]?: T;
-  };
+  >;
 
 type RequiredKeys<TObject extends object> = {
   [K in keyof TObject]-?: {} extends Pick<TObject, K> ? never : K;
@@ -246,12 +243,6 @@ export type InferSigmaDefinition<T extends SigmaType<any, any, any>> = Extract<
   Simplify<OmitEmpty<T[Def]>>,
   SigmaDefinition
 >;
-
-export type InferSigmaStateDefinition<T extends AnySigmaState> = T extends {
-  readonly [sigmaDefinitionBrand]?: infer TDefinition extends SigmaDefinition;
-}
-  ? TDefinition
-  : SigmaDefinition;
 
 /** Infers the `setup(...)` argument list for a sigma-state instance. */
 export type InferSetupArgs<T extends AnySigmaState> = T extends {
