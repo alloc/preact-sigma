@@ -49,11 +49,17 @@ export type PersistSchedule = "immediate" | "microtask" | { debounceMs: number }
 
 /** Options shared by restore and persistence helpers. */
 export interface PersistOptions<T extends SigmaDefinition, TStored = Snapshot<T>> {
+  /** Storage key used for reads, writes, and removals. */
   key: string;
+  /** Store adapter that owns persistence I/O. */
   store: PersistStore<PersistRecord<TStored>>;
+  /** Codec that maps committed snapshots to stored payloads. Defaults to an identity codec with version 1. */
   codec?: PersistCodec<Snapshot<T>, TStored>;
+  /** Scheduling policy for future writes. Defaults to `"microtask"`. */
   schedule?: PersistSchedule;
+  /** Writes the current committed snapshot once after persistence becomes active. */
   writeInitial?: boolean;
+  /** Receives background write failures without stopping persistence automatically. */
   onWriteError?: (
     error: unknown,
     context: {
@@ -82,18 +88,23 @@ export type RestoreResult =
 
 /** Handle returned by persistence bindings. */
 export interface PersistenceHandle {
+  /** Waits for any scheduled or active write for this binding to finish. */
   flush(): Promise<void>;
+  /** Removes the stored record and keeps the binding active for later writes. */
   clear(): Promise<void>;
+  /** Stops future persistence and waits for any active write to settle. */
   stop(): Promise<void>;
 }
 
 /** Async restore-plus-persist binding result. */
 export interface BoundPersistence extends PersistenceHandle {
+  /** Resolves when restore finishes and reports whether a record was applied. */
   readonly restored: Promise<RestoreResult>;
 }
 
 /** Sync restore-plus-persist binding result. */
 export interface SyncBoundPersistence extends PersistenceHandle {
+  /** Reports the synchronous restore result that ran before persistence started. */
   readonly restored: RestoreResult;
 }
 
@@ -152,6 +163,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return prototype === Object.prototype || prototype === null;
 }
 
+/** Restores committed state from a persisted record through an async store. */
 export async function restoreState<T extends SigmaDefinition, TStored = Snapshot<T>>(
   instance: SigmaState<T>,
   options: PersistOptions<T, TStored>,

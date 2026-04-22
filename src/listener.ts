@@ -1,14 +1,20 @@
 import { sigmaEventsBrand, sigmaTargetBrand } from "./internal/symbols.js";
 import type { AnyEvents, Cleanup } from "./internal/types.js";
 
+/** Structural event-target shape used by `listen(...)` for sigma targets and sigma states. */
 export type SigmaTargetLike = {
   readonly [sigmaTargetBrand]: SigmaListenerMap;
 };
 
+/** Target types supported by `listen(...)` and `useListener(...)`. */
 export type Listenable = SigmaTargetLike | EventTarget;
+
+/** Untyped listener shape stored internally by `SigmaListenerMap`. */
 export type RawSigmaListener = (detail: unknown) => void;
 
+/** Listener registry used by sigma targets and sigma states for typed event delivery. */
 export class SigmaListenerMap extends Map<string, Set<RawSigmaListener>> {
+  /** Delivers one event payload to the current listeners for `name`. */
   emit(name: string, detail: unknown) {
     const listeners = this.get(name);
     if (!listeners?.size) {
@@ -20,6 +26,7 @@ export class SigmaListenerMap extends Map<string, Set<RawSigmaListener>> {
     }
   }
 
+  /** Adds one listener for `name`, creating the listener set on first use. */
   addListener(name: string, listener: RawSigmaListener) {
     let listeners = this.get(name);
     if (!listeners) {
@@ -29,6 +36,7 @@ export class SigmaListenerMap extends Map<string, Set<RawSigmaListener>> {
     listeners.add(listener);
   }
 
+  /** Removes one listener for `name` and prunes the empty listener set. */
   removeListener(name: string, listener: RawSigmaListener) {
     const listeners = this.get(name);
     if (!listeners) {
