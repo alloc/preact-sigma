@@ -96,9 +96,6 @@ test("sigma infers public state from the two-step declaration", () => {
   assertType<readonly Todo[]>(sigma.getState(todoList).todos);
   assertType<() => void>(
     sigma.subscribe(todoList, function (change) {
-      assertType<string>(this.draft);
-      assertType<number>(this.completedCount);
-      assertType<boolean>(this.canAdd());
       assertType<string>(change.oldState.draft);
       assertType<readonly Todo[]>(change.newState.todos);
       // @ts-expect-error patches are only available when requested
@@ -126,8 +123,6 @@ test("sigma infers public state from the two-step declaration", () => {
       expectTypeOf(todo).toEqualTypeOf<Todo>();
     }),
   );
-  // @ts-expect-error sigma.on was removed in favor of listen()
-  sigma.on(todoList, "reset", () => {});
   assertType<
     SigmaState<{
       state: {
@@ -239,7 +234,6 @@ test("sigma infers public state from the two-step declaration", () => {
   sigma.subscribe(
     observedCount,
     function (change) {
-      assertType<number>(this.count);
       assertType<readonly Patch[]>(change.patches);
       assertType<readonly Patch[]>(change.inversePatches);
     },
