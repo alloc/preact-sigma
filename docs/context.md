@@ -1,6 +1,6 @@
 # Overview
 
-`preact-sigma` builds reusable state models from one definition. A configured `SigmaType` owns top-level state, derived reads, writes, setup handlers, and typed events. Each top-level state property is exposed as a reactive public property backed by its own Preact signal, while actions use Immer-style mutation semantics to publish committed state. For event-only flows, `SigmaTarget` provides a standalone typed event hub with no managed state. For committed-state persistence, the optional `preact-sigma/persist` helpers keep storage, scheduling, and migration policy outside `SigmaType`.
+`preact-sigma` builds reusable state models from one definition. A configured `SigmaType` owns top-level state, derived reads, writes, setup handlers, and typed events. Each top-level state property is exposed as a reactive public property backed by its own Preact signal, while actions use Immer-style mutation semantics to publish committed state. For event-only flows, `SigmaTarget` provides a standalone typed event hub with no managed state.
 
 # When to Use
 
@@ -56,9 +56,6 @@
 - Create a standalone typed event hub with no managed state: `new SigmaTarget<TEvents>()`, `hub.emit(...)`, and `listen(hub, ...)`
 - Subscribe outside components: `listen(instance, ...)`
 - Read or restore committed top-level state: `sigma.getState(...)` and `sigma.replaceState(...)`
-- Restore one committed snapshot from storage: `restoreState(...)` or `restoreStateSync(...)` from `preact-sigma/persist`
-- Restore first, then persist future committed changes: `bindPersistence(...)` or `bindPersistenceSync(...)` from `preact-sigma/persist`
-- Persist only selected top-level keys while restoring a full snapshot: `pickStateCodec(...)` from `preact-sigma/persist`
 
 # Recommended Patterns
 
@@ -69,8 +66,6 @@
 - Keep one-off calculations local until they become reusable model behavior.
 - Use ordinary actions for routine writes. Reserve `sigma.getState(...)` and `sigma.replaceState(...)` for replay, reset, or undo-like flows on committed top-level state.
 - Prefer `listen(...)` for external event subscriptions. It works with sigma states, `SigmaTarget`, and DOM targets.
-- Keep persistence, storage, and migration policy at the instance boundary with `preact-sigma/persist` helpers instead of encoding them into `SigmaType`.
-- Use `bindPersistence(...)` or `bindPersistenceSync(...)` when restore-first persistence is the actual lifecycle you want.
 - Put owned side effects in `.setup(...)`.
 - Use `this.act(function () { ... })` for setup-owned callbacks that need action semantics.
 
@@ -92,7 +87,6 @@
 - Setup handlers return arrays of cleanup resources, and cleanup runs in reverse order.
 - Call Immer's `enablePatches()` before relying on `sigma.subscribe(instance, handler, { patches: true })`.
 - `sigma.replaceState(...)` works on committed top-level state and requires the exact state-key shape.
-- `preact-sigma/persist` helpers operate on committed top-level state only. Partial persistence codecs still need to reconstruct a full replacement snapshot.
 - Published draftable public state is deep-frozen by default. `setAutoFreeze(false)` disables that behavior globally.
 
 # Error Model
