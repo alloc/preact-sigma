@@ -6,11 +6,10 @@ import {
   immerable,
   listen,
   query,
-  replaceState,
   setAutoFreeze,
+  sigma,
   SigmaTarget,
   SigmaType,
-  snapshot,
   useListener,
   type SigmaRef,
   type SigmaState,
@@ -78,15 +77,6 @@ test("sigma infers public state from the two-step declaration", () => {
     })
     .computed(todoListComputeds)
     .queries(todoListQueries)
-    .observe(function (change) {
-      assertType<string>(this.draft);
-      assertType<number>(this.completedCount);
-      assertType<boolean>(this.canAdd());
-      assertType<string>(change.oldState.draft);
-      assertType<readonly Todo[]>(change.newState.todos);
-      // @ts-expect-error patches are only available when requested
-      void change.patches;
-    })
     .setup(function (prefix: string) {
       void prefix;
       return [];
@@ -100,24 +90,44 @@ test("sigma infers public state from the two-step declaration", () => {
   assertType<number>(todoList.completedCount);
   assertType<boolean>(todoList.canAdd());
   assertType<void>(todoList.setDraft("next"));
-  assertType<string>(snapshot(todoList).draft);
-  assertType<readonly Todo[]>(snapshot(todoList).todos);
-  assertType<void>(replaceState(todoList, snapshot(todoList)));
-  replaceState(todoList, {
+  assertType<string>(sigma.getSignal(todoList, "draft").value);
+  assertType<number>(sigma.getSignal(todoList, "completedCount").value);
+  assertType<string>(sigma.getState(todoList).draft);
+  assertType<readonly Todo[]>(sigma.getState(todoList).todos);
+  assertType<() => void>(
+    sigma.subscribe(todoList, function (change) {
+      assertType<string>(this.draft);
+      assertType<number>(this.completedCount);
+      assertType<boolean>(this.canAdd());
+      assertType<string>(change.oldState.draft);
+      assertType<readonly Todo[]>(change.newState.todos);
+      // @ts-expect-error patches are only available when requested
+      void change.patches;
+    }),
+  );
+  assertType<() => void>(
+    sigma.subscribe(todoList, "draft", (draft) => {
+      assertType<string>(draft);
+    }),
+  );
+  assertType<void>(sigma.replaceState(todoList, sigma.getState(todoList)));
+  sigma.replaceState(todoList, {
     draft: "ready",
     todos: [],
   });
   // @ts-expect-error replaceState requires the full state shape
-  replaceState(todoList, {
+  sigma.replaceState(todoList, {
     draft: "missing todos",
   });
   assertType<() => void>(todoList.setup("id"));
-  assertType<() => void>(todoList.on("reset", () => {}));
+  assertType<() => void>(listen(todoList, "reset", () => {}));
   assertType<() => void>(
-    todoList.on("added", (todo) => {
+    listen(todoList, "added", (todo) => {
       expectTypeOf(todo).toEqualTypeOf<Todo>();
     }),
   );
+  // @ts-expect-error sigma.on was removed in favor of listen()
+  sigma.on(todoList, "reset", () => {});
   assertType<
     SigmaState<{
       state: {
@@ -222,18 +232,19 @@ test("sigma infers public state from the two-step declaration", () => {
       return () => {};
     });
 
-  new SigmaType<{ count: number }>()
-    .defaultState({
-      count: 0,
-    })
-    .observe(
-      function (change) {
-        assertType<number>(this.count);
-        assertType<readonly Patch[]>(change.patches);
-        assertType<readonly Patch[]>(change.inversePatches);
-      },
-      { patches: true },
-    );
+  const observedCount = new (new SigmaType<{ count: number }>().defaultState({
+    count: 0,
+  }))();
+
+  sigma.subscribe(
+    observedCount,
+    function (change) {
+      assertType<number>(this.count);
+      assertType<readonly Patch[]>(change.patches);
+      assertType<readonly Patch[]>(change.inversePatches);
+    },
+    { patches: true },
+  );
 });
 
 test("SigmaTarget infers typed events for listen and useListener", () => {

@@ -6,11 +6,10 @@ import {
   immerable,
   listen,
   query,
-  replaceState,
   setAutoFreeze,
+  sigma,
   SigmaTarget,
   SigmaType,
-  snapshot,
   type SigmaState,
 } from "preact-sigma";
 
@@ -68,7 +67,7 @@ test("sigma states expose readonly state, computeds, queries, and actions", () =
   const todoList = new TodoList();
   const observedCounts = computed(() => todoList.completedCount);
   let addedTitle = "";
-  const stop = todoList.on("added", (todo) => {
+  const stop = listen(todoList, "added", (todo) => {
     addedTitle = todo.title;
   });
 
@@ -101,7 +100,7 @@ test("sigma states expose readonly state, computeds, queries, and actions", () =
   stop();
 });
 
-test("snapshot returns committed public state and computed getters stay out of enumeration", () => {
+test("sigma.getState returns committed public state and computed getters stay out of enumeration", () => {
   const Counter = new SigmaType<{ count: number }>()
     .defaultState({
       count: 1,
@@ -119,12 +118,50 @@ test("snapshot returns committed public state and computed getters stay out of e
 
   const counter = new Counter();
 
-  assert.deepEqual(snapshot(counter), { count: 1 });
+  assert.deepEqual(sigma.getState(counter), { count: 1 });
+  assert.equal(sigma.getSignal(counter, "count").value, 1);
+  assert.equal(sigma.getSignal(counter, "doubled").value, 2);
   assert.deepEqual(Object.keys(counter), ["count"]);
   assert.equal(
     Object.getOwnPropertyDescriptor(Object.getPrototypeOf(counter), "doubled")?.enumerable,
     false,
   );
+});
+
+test("sigma.subscribe can observe one state property or computed signal", () => {
+  const observedCounts: number[] = [];
+  const observedDoubles: number[] = [];
+
+  const Counter = new SigmaType<{ count: number }>()
+    .defaultState({
+      count: 0,
+    })
+    .computed({
+      doubled() {
+        return this.count * 2;
+      },
+    })
+    .actions({
+      increment() {
+        this.count += 1;
+      },
+    });
+
+  const counter = new Counter();
+  const stopCount = sigma.subscribe(counter, "count", (count) => {
+    observedCounts.push(count);
+  });
+  const stopDoubled = sigma.subscribe(counter, "doubled", (doubled) => {
+    observedDoubles.push(doubled);
+  });
+
+  counter.increment();
+  stopCount();
+  stopDoubled();
+  counter.increment();
+
+  assert.deepEqual(observedCounts, [0, 1]);
+  assert.deepEqual(observedDoubles, [0, 2]);
 });
 
 test("listen unwraps sigma-state event payloads and supports void events", () => {
@@ -351,7 +388,7 @@ test("setup act runs an anonymous action with normal action semantics", () => {
     });
 
   const store = new Store();
-  const stop = store.on("changed", ({ count }) => {
+  const stop = listen(store, "changed", ({ count }) => {
     observedCounts.push(count);
   });
 
@@ -428,9 +465,6 @@ test("commit publishes an explicit boundary inside sync actions", () => {
     .defaultState({
       count: 0,
     })
-    .observe((change) => {
-      observed.push(change.newState.count);
-    })
     .actions({
       incrementTwice() {
         this.count += 1;
@@ -440,11 +474,15 @@ test("commit publishes an explicit boundary inside sync actions", () => {
     });
 
   const counter = new Counter();
+  const stop = sigma.subscribe(counter, (change) => {
+    observed.push(change.newState.count);
+  });
 
   counter.incrementTwice();
 
   assert.equal(counter.count, 2);
   assert.deepEqual(observed, [1, 2]);
+  stop();
 });
 
 test("non-async actions that return promises throw and discard draft changes", () => {
@@ -503,9 +541,6 @@ test("async actions can commit after await", async () => {
     .defaultState({
       count: 0,
     })
-    .observe((change) => {
-      observed.push(change.newState.count);
-    })
     .actions({
       async incrementLater() {
         this.count += 1;
@@ -516,6 +551,9 @@ test("async actions can commit after await", async () => {
     });
 
   const counter = new Counter();
+  const stop = sigma.subscribe(counter, (change) => {
+    observed.push(change.newState.count);
+  });
   const pending = counter.incrementLater();
 
   assert.equal(counter.count, 1);
@@ -523,9 +561,10 @@ test("async actions can commit after await", async () => {
 
   assert.equal(counter.count, 2);
   assert.deepEqual(observed, [1, 2]);
+  stop();
 });
 
-test("replaceState restores committed state and notifies observers", () => {
+test("sigma.replaceState restores committed state and notifies subscribers", () => {
   enablePatches();
 
   const observed: Array<{
@@ -538,16 +577,6 @@ test("replaceState restores committed state and notifies observers", () => {
     .defaultState({
       count: 0,
     })
-    .observe(
-      (change) => {
-        observed.push({
-          count: change.newState.count,
-          inversePatches: [...change.inversePatches],
-          patches: [...change.patches],
-        });
-      },
-      { patches: true },
-    )
     .actions({
       increment() {
         this.count += 1;
@@ -555,10 +584,21 @@ test("replaceState restores committed state and notifies observers", () => {
     });
 
   const counter = new Counter();
-  const initial = snapshot(counter);
+  const stop = sigma.subscribe(
+    counter,
+    (change) => {
+      observed.push({
+        count: change.newState.count,
+        inversePatches: [...change.inversePatches],
+        patches: [...change.patches],
+      });
+    },
+    { patches: true },
+  );
+  const initial = sigma.getState(counter);
 
   counter.increment();
-  replaceState(counter, initial);
+  sigma.replaceState(counter, initial);
 
   assert.equal(counter.count, 0);
   assert.lengthOf(observed, 2);
@@ -566,9 +606,10 @@ test("replaceState restores committed state and notifies observers", () => {
     { op: "replace", path: ["count"], value: 1 },
   ]);
   assert.sameDeepMembers(observed[1].patches, [{ op: "replace", path: ["count"], value: 0 }]);
+  stop();
 });
 
-test("replaceState validates snapshot shape", () => {
+test("sigma.replaceState validates snapshot shape", () => {
   const Search = new SigmaType<{
     draft: string;
     page: number;
@@ -580,15 +621,15 @@ test("replaceState validates snapshot shape", () => {
   const search = new Search();
 
   assert.throws(() => {
-    replaceState(search, [] as unknown as { draft: string; page: number });
+    sigma.replaceState(search, [] as unknown as { draft: string; page: number });
   }, /requires a plain object snapshot/);
 
   assert.throws(() => {
-    replaceState(search, { draft: "" } as unknown as { draft: string; page: number });
+    sigma.replaceState(search, { draft: "" } as unknown as { draft: string; page: number });
   }, /Missing: page/);
 
   assert.throws(() => {
-    replaceState(search, {
+    sigma.replaceState(search, {
       draft: "",
       extra: true,
       page: 1,
@@ -596,15 +637,12 @@ test("replaceState validates snapshot shape", () => {
   }, /Extra: extra/);
 });
 
-test("replaceState is a no-op for the current committed snapshot", () => {
+test("sigma.replaceState is a no-op for the current committed snapshot", () => {
   const observed: number[] = [];
 
   const Counter = new SigmaType<{ count: number }>()
     .defaultState({
       count: 0,
-    })
-    .observe((change) => {
-      observed.push(change.newState.count);
     })
     .actions({
       increment() {
@@ -613,20 +651,24 @@ test("replaceState is a no-op for the current committed snapshot", () => {
     });
 
   const counter = new Counter();
-  const initial = snapshot(counter);
+  const stop = sigma.subscribe(counter, (change) => {
+    observed.push(change.newState.count);
+  });
+  const initial = sigma.getState(counter);
 
-  replaceState(counter, initial);
+  sigma.replaceState(counter, initial);
   assert.deepEqual(observed, []);
 
   counter.increment();
-  const changed = snapshot(counter);
-  replaceState(counter, changed);
+  const changed = sigma.getState(counter);
+  sigma.replaceState(counter, changed);
 
   assert.equal(counter.count, 1);
   assert.deepEqual(observed, [1]);
+  stop();
 });
 
-test("replaceState throws while an async action has unpublished changes", async () => {
+test("sigma.replaceState throws while an async action has unpublished changes", async () => {
   let release!: () => void;
   const blocked = new Promise<void>((resolve) => {
     release = resolve;
@@ -652,7 +694,7 @@ test("replaceState throws while an async action has unpublished changes", async 
   await Promise.resolve();
 
   assert.throws(() => {
-    replaceState(counter, snapshot(counter));
+    sigma.replaceState(counter, sigma.getState(counter));
   }, /stageIncrement/);
 
   release();
@@ -801,7 +843,7 @@ test("same-instance async actions can start from another action when no draft is
   assert.equal(counter.count, 2);
 });
 
-test("observe runs after committed base-state changes", () => {
+test("sigma.subscribe runs after committed base-state changes from setup", () => {
   const observed: Array<{
     count: number;
     doubled: number;
@@ -824,14 +866,18 @@ test("observe runs after committed base-state changes", () => {
         return this.count > 0;
       },
     })
-    .observe(function (change) {
-      observed.push({
-        count: this.count,
-        doubled: this.doubled,
-        hasCount: this.hasCount(),
-        previousCount: change.oldState.count,
-        stateCount: change.newState.count,
-      });
+    .setup(function () {
+      return [
+        sigma.subscribe(this, function (change) {
+          observed.push({
+            count: this.count,
+            doubled: this.doubled,
+            hasCount: this.hasCount(),
+            previousCount: change.oldState.count,
+            stateCount: change.newState.count,
+          });
+        }),
+      ];
     })
     .actions({
       increment() {
@@ -845,6 +891,7 @@ test("observe runs after committed base-state changes", () => {
     });
 
   const counter = new Counter();
+  const cleanup = counter.setup();
 
   counter.noop();
   assert.deepEqual(observed, []);
@@ -860,9 +907,11 @@ test("observe runs after committed base-state changes", () => {
       stateCount: 2,
     },
   ]);
+
+  cleanup();
 });
 
-test("observe can include immer patches when enabled by the app", () => {
+test("sigma.subscribe can include immer patches when enabled by the app", () => {
   enablePatches();
 
   const observed: Array<{
@@ -878,15 +927,6 @@ test("observe can include immer patches when enabled by the app", () => {
       draft: "",
       tags: [],
     })
-    .observe(
-      (change) => {
-        observed.push({
-          inversePatches: [...change.inversePatches],
-          patches: [...change.patches],
-        });
-      },
-      { patches: true },
-    )
     .actions({
       update() {
         this.draft = "hello";
@@ -895,6 +935,16 @@ test("observe can include immer patches when enabled by the app", () => {
     });
 
   const search = new Search();
+  const stop = sigma.subscribe(
+    search,
+    (change) => {
+      observed.push({
+        inversePatches: [...change.inversePatches],
+        patches: [...change.patches],
+      });
+    },
+    { patches: true },
+  );
 
   search.update();
 
@@ -907,6 +957,7 @@ test("observe can include immer patches when enabled by the app", () => {
     { op: "replace", path: ["draft"], value: "hello" },
     { op: "add", path: ["tags", 0], value: "sigma" },
   ]);
+  stop();
 });
 
 test("external query helpers isolate caller tracking", () => {

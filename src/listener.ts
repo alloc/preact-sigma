@@ -99,7 +99,7 @@ export class SigmaTarget<TEvents extends AnyEvents = {}> extends EventTarget {
   }
 }
 
-/** Adds a listener to a sigma state or DOM target and returns a cleanup function that removes it. */
+/** Adds a listener to a sigma state, `SigmaTarget`, or DOM target and returns a cleanup function that removes it. */
 export function listen<TTarget extends EventTarget, TEvent extends InferEventType<TTarget>>(
   target: TTarget,
   name: TEvent,

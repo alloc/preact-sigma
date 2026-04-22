@@ -10,6 +10,11 @@ import type {
   AnySigmaState,
   AnyState,
   Cleanup,
+  InferSigmaStateDefinition,
+  SigmaObserveChange,
+  SigmaObserveOptions,
+  SigmaReadonly,
+  SigmaSignals,
   SigmaState,
 } from "./types.js";
 
@@ -18,8 +23,6 @@ export type SigmaTypeInternals = {
   _computeFunctions: Record<string, AnyFunction>;
   _defaultState: Record<string, unknown>;
   _defaultStateKeys: string[];
-  _observeFunction: AnyFunction | null;
-  _patchesEnabled: boolean;
   _queryFunctions: Record<string, AnyFunction>;
   _setupFunction: AnyFunction | null;
 };
@@ -39,11 +42,18 @@ export type ActionOwner = {
 };
 
 export type SigmaInternals = {
+  changeSubscriptions: Set<SigmaChangeSubscription>;
   currentSetupCleanup?: Cleanup;
+  patchSubscriptions: number;
   publicInstance: AnySigmaState;
   stateKeys: Set<string>;
   type: SigmaTypeInternals;
   disposed: boolean;
+};
+
+type SigmaChangeSubscription = {
+  listener: AnyFunction;
+  patches: boolean;
 };
 
 const sigmaInternalsMap = new WeakMap<object, SigmaInternals>();
@@ -74,22 +84,10 @@ export function getSigmaInternals(context: object): SigmaInternals {
   return instance;
 }
 
-export function isAutoFreeze() {
-  return autoFreezeEnabled;
-}
-
 /** Controls whether sigma deep-freezes published public state. Auto-freezing starts enabled and the setting is shared across instances. */
 export function setAutoFreeze(autoFreeze: boolean) {
   autoFreezeEnabled = autoFreeze;
   immer.setAutoFreeze(autoFreeze);
-}
-
-export function isPlainObject(value: unknown): value is Record<string, unknown> {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    return false;
-  }
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
 }
 
 export function getSignal(instance: SigmaInternals, key: string) {
@@ -109,7 +107,9 @@ export function initializeSigmaInstance(
   }
 
   const instance: SigmaInternals = {
+    changeSubscriptions: new Set(),
     currentSetupCleanup: undefined,
+    patchSubscriptions: 0,
     publicInstance,
     stateKeys,
     type,
@@ -183,10 +183,6 @@ export function readActionStateValue(owner: ActionOwner, key: string, options: C
   return committedValue;
 }
 
-export function readActionComputedValue(owner: ActionOwner, key: string) {
-  return owner.instance.type._computeFunctions[key].call(getContext(owner, "computedDraftAware"));
-}
-
 export function setActionStateValue(owner: ActionOwner, key: string, value: unknown) {
   ensureOwnerDraft(owner)[key] = value;
 }
@@ -227,7 +223,14 @@ export function handleActionBoundary(
 
   console.warn(
     `[preact-sigma] Discarded unpublished action changes from "${draftOwner.actionName}" before running "${actionName ?? "another action"}".`,
-    createDraftMetadata(draftOwner),
+    {
+      action: draftOwner.actionFn,
+      actionArgs: draftOwner.args,
+      actionId: draftOwner.id,
+      actionName: draftOwner.actionName,
+      draftedInstance: currentDraftOwner?.publicInstance ?? draftOwner.publicInstance,
+      instance: draftOwner.instance.publicInstance,
+    },
   );
 }
 
@@ -295,7 +298,7 @@ function runActionInvocation(
   }
 
   const isAdHocAction = actionName === "act()";
-  const actionIsAsync = isAsyncFunction(actionFn);
+  const actionIsAsync = actionFn.constructor.name === "AsyncFunction";
   if (actionIsAsync && isAdHocAction) {
     throw new Error("[preact-sigma] act() callbacks must stay synchronous");
   }
@@ -348,23 +351,6 @@ function runActionInvocation(
   });
 }
 
-function createCommitError(owner: ActionOwner) {
-  return new Error(
-    `[preact-sigma] Async action "${owner.actionName}" finished with unpublished changes. Call this.commit() before await or return.`,
-  );
-}
-
-function createDraftMetadata(owner: ActionOwner) {
-  return {
-    action: owner.actionFn,
-    actionArgs: owner.args,
-    actionId: owner.id,
-    actionName: owner.actionName,
-    draftedInstance: currentDraftOwner?.publicInstance ?? owner.publicInstance,
-    instance: owner.instance.publicInstance,
-  };
-}
-
 function disposeCleanupResource(resource: AnyResource) {
   if (typeof resource === "function") {
     resource();
@@ -377,9 +363,9 @@ function disposeCleanupResource(resource: AnyResource) {
   }
 }
 
-function assertExactStateKeys(instance: SigmaInternals, nextState: AnyState) {
-  const extraKeys = Object.keys(nextState).filter((key) => !instance.stateKeys.has(key));
-  const missingKeys = [...instance.stateKeys].filter(
+function assertExactStateKeys(stateKeys: Set<string>, nextState: AnyState) {
+  const extraKeys = Object.keys(nextState).filter((key) => !stateKeys.has(key));
+  const missingKeys = [...stateKeys].filter(
     (key) => !Object.prototype.hasOwnProperty.call(nextState, key),
   );
 
@@ -445,12 +431,13 @@ function finalizeOwnerDraft(owner: ActionOwner): FinalizedDraftResult | undefine
   let patches: Patch[] | undefined;
   let inversePatches: Patch[] | undefined;
 
-  const newState = owner.instance.type._patchesEnabled
-    ? immer.finishDraft(currentDraft, (nextPatches, nextInversePatches) => {
-        patches = nextPatches;
-        inversePatches = nextInversePatches;
-      })
-    : immer.finishDraft(currentDraft);
+  const newState =
+    owner.instance.patchSubscriptions > 0
+      ? immer.finishDraft(currentDraft, (nextPatches, nextInversePatches) => {
+          patches = nextPatches;
+          inversePatches = nextInversePatches;
+        })
+      : immer.finishDraft(currentDraft);
 
   return {
     changed: newState !== oldState,
@@ -474,12 +461,13 @@ function finalizeReplacementState(
   let patches: Patch[] | undefined;
   let inversePatches: Patch[] | undefined;
 
-  const newState = instance.type._patchesEnabled
-    ? immer.finishDraft(draft, (nextPatches, nextInversePatches) => {
-        patches = nextPatches;
-        inversePatches = nextInversePatches;
-      })
-    : immer.finishDraft(draft);
+  const newState =
+    instance.patchSubscriptions > 0
+      ? immer.finishDraft(draft, (nextPatches, nextInversePatches) => {
+          patches = nextPatches;
+          inversePatches = nextInversePatches;
+        })
+      : immer.finishDraft(draft);
 
   return {
     changed: newState !== oldState,
@@ -490,10 +478,6 @@ function finalizeReplacementState(
   };
 }
 
-function isAsyncFunction(fn: AnyFunction) {
-  return fn.constructor.name === "AsyncFunction";
-}
-
 function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
   return value != null && typeof (value as PromiseLike<unknown>).then === "function";
 }
@@ -502,7 +486,7 @@ function publishState(instance: SigmaInternals, finalized: FinalizedDraftResult)
   batch(() => {
     for (const key of instance.stateKeys) {
       const nextValue = finalized.newState[key];
-      if (isAutoFreeze()) {
+      if (autoFreezeEnabled) {
         immer.freeze(nextValue, true);
       }
       const signal = getSignal(instance, key) as Signal<any>;
@@ -510,49 +494,125 @@ function publishState(instance: SigmaInternals, finalized: FinalizedDraftResult)
     }
   });
 
-  instance.type._observeFunction?.call(getContext(instance, "observe"), finalized);
+  if (instance.changeSubscriptions.size) {
+    const context = getContext(instance, "observe");
+    for (const subscription of instance.changeSubscriptions) {
+      subscription.listener.call(context, finalized);
+    }
+  }
 }
 
 /**
- * Returns a shallow snapshot of an instance's committed public state.
+ * Utility helpers for sigma-state instances.
  *
- * The snapshot includes one own property for each top-level state key and reads
- * the current committed value for that key. Nested sigma states remain as
- * referenced values. Its type is inferred from the instance's sigma-state
- * definition.
+ * The helpers expose instance-specific built-ins without reserving names on the
+ * public instance object.
  */
-export function snapshot<T extends AnySigmaState>(
-  publicInstance: T,
-): T extends SigmaState<infer TDefinition> ? Immutable<TDefinition["state"]> : never {
-  return snapshotState(getSigmaInternals(publicInstance)) as any;
-}
+export const sigma = Object.freeze({
+  /** Returns the underlying signal for a top-level state property or computed. */
+  getSignal: <
+    T extends SigmaState<any>,
+    TDefinition extends InferSigmaStateDefinition<T> = InferSigmaStateDefinition<T>,
+    TKey extends Extract<keyof SigmaSignals<TDefinition>, string> = Extract<
+      keyof SigmaSignals<TDefinition>,
+      string
+    >,
+  >(
+    publicInstance: T,
+    key: TKey,
+  ) => {
+    return (publicInstance as any)[signalPrefix + key] as ReadonlySignal<
+      SigmaSignals<TDefinition>[TKey]
+    >;
+  },
 
-/**
- * Replaces an instance's committed public state from a snapshot object.
- *
- * The replacement snapshot must be a plain object with exactly the instance's
- * top-level state keys. It updates committed state outside action semantics and
- * notifies observers when the committed state changes. Its type is inferred
- * from the instance's sigma-state definition.
- */
-export function replaceState<T extends AnySigmaState>(
-  publicInstance: T,
-  nextState: T extends SigmaState<infer TDefinition> ? Immutable<TDefinition["state"]> : never,
-) {
-  const instance = getSigmaInternals(publicInstance);
-  if (!isPlainObject(nextState)) {
-    throw new Error("[preact-sigma] replaceState() requires a plain object snapshot");
-  }
+  /** Returns a shallow snapshot of an instance's committed public state. */
+  getState: <
+    T extends SigmaState<any>,
+    TDefinition extends InferSigmaStateDefinition<T> = InferSigmaStateDefinition<T>,
+  >(
+    publicInstance: T,
+  ) => {
+    return snapshotState(getSigmaInternals(publicInstance)) as Immutable<TDefinition["state"]>;
+  },
 
-  assertNoPendingDraft("replaceState");
-  assertExactStateKeys(instance, nextState);
+  /** Replaces an instance's committed public state from a snapshot object. */
+  replaceState: <
+    T extends SigmaState<any>,
+    TDefinition extends InferSigmaStateDefinition<T> = InferSigmaStateDefinition<T>,
+  >(
+    publicInstance: T,
+    nextState: Immutable<TDefinition["state"]>,
+  ) => {
+    const instance = getSigmaInternals(publicInstance);
+    if (
+      nextState === null ||
+      typeof nextState !== "object" ||
+      Array.isArray(nextState) ||
+      ![Object.prototype, null].includes(Object.getPrototypeOf(nextState))
+    ) {
+      throw new Error("[preact-sigma] replaceState() requires a plain object snapshot");
+    }
 
-  const oldState = snapshot(publicInstance);
-  const finalized = finalizeReplacementState(instance, oldState, nextState);
-  if (finalized.changed) {
-    publishState(instance, finalized);
-  }
-}
+    assertNoPendingDraft("replaceState");
+    assertExactStateKeys(instance.stateKeys, nextState);
+
+    const oldState = snapshotState(instance);
+    const finalized = finalizeReplacementState(instance, oldState, nextState as AnyState);
+    if (finalized.changed) {
+      publishState(instance, finalized);
+    }
+  },
+
+  /** Subscribes to committed state changes or one top-level property signal. */
+  subscribe: <
+    T extends SigmaState<any>,
+    TDefinition extends InferSigmaStateDefinition<T> = InferSigmaStateDefinition<T>,
+    TKey extends Extract<keyof SigmaSignals<TDefinition>, string> = Extract<
+      keyof SigmaSignals<TDefinition>,
+      string
+    >,
+    TOptions extends SigmaObserveOptions | undefined = undefined,
+  >(
+    publicInstance: T,
+    keyOrListener:
+      | TKey
+      | ((
+          this: SigmaReadonly<TDefinition>,
+          change: SigmaObserveChange<
+            TDefinition["state"],
+            TOptions extends { patches: true } ? true : false
+          >,
+        ) => void),
+    listenerOrOptions?: ((value: SigmaSignals<TDefinition>[TKey]) => void) | TOptions,
+  ): Cleanup => {
+    const instance = getSigmaInternals(publicInstance);
+
+    if (typeof keyOrListener === "string") {
+      return getSignal(instance, keyOrListener).subscribe(listenerOrOptions as AnyFunction);
+    }
+
+    const options = listenerOrOptions as SigmaObserveOptions | undefined;
+    const subscription = {
+      listener: keyOrListener as AnyFunction,
+      patches: options?.patches ?? false,
+    };
+
+    instance.changeSubscriptions.add(subscription);
+    if (subscription.patches) {
+      instance.patchSubscriptions += 1;
+    }
+
+    return () => {
+      if (!instance.changeSubscriptions.delete(subscription)) {
+        return;
+      }
+      if (subscription.patches) {
+        instance.patchSubscriptions -= 1;
+      }
+    };
+  },
+});
 
 async function resolveAsyncActionResult(owner: ActionOwner, result: PromiseLike<unknown>) {
   let settledValue: unknown;
@@ -571,7 +631,9 @@ async function resolveAsyncActionResult(owner: ActionOwner, result: PromiseLike<
     if (finalized?.changed) {
       // Settling with unpublished changes is the async-action footgun we want to
       // surface directly. The draft is discarded and the promise rejects here.
-      const commitError = createCommitError(owner);
+      const commitError = new Error(
+        `[preact-sigma] Async action "${owner.actionName}" finished with unpublished changes. Call this.commit() before await or return.`,
+      );
       if (rejected) {
         throw new AggregateError(
           [settledError, commitError],
@@ -593,6 +655,7 @@ async function resolveAsyncActionResult(owner: ActionOwner, result: PromiseLike<
 export class Sigma extends EventTarget {
   setup(...args: any[]): Cleanup {
     const instance = getSigmaInternals(this);
+
     if (!instance.type._setupFunction) {
       throw new Error("[preact-sigma] Setup is undefined for this sigma state");
     }
@@ -602,7 +665,10 @@ export class Sigma extends EventTarget {
     instance.currentSetupCleanup?.();
     instance.currentSetupCleanup = undefined;
 
-    const resources = instance.type._setupFunction.apply(getContext(instance, "setup"), args);
+    const resources = instance.type._setupFunction.apply(
+      getContext(instance, "setup"),
+      args as any[],
+    );
     if (!Array.isArray(resources)) {
       throw new Error("[preact-sigma] Sigma setup handlers must return an array");
     }
@@ -636,26 +702,6 @@ export class Sigma extends EventTarget {
     }
 
     return cleanup;
-  }
-
-  get(key: string) {
-    const instance = getSigmaInternals(this);
-    return getSignal(instance, key);
-  }
-
-  on(name: string, listener: (...args: any[]) => void) {
-    const adapter: EventListener = (event) => {
-      const payload = (event as CustomEvent).detail;
-      if (payload === undefined) {
-        listener();
-      } else {
-        listener(payload);
-      }
-    };
-    this.addEventListener(name, adapter);
-    return () => {
-      this.removeEventListener(name, adapter);
-    };
   }
 }
 export interface Sigma {

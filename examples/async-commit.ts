@@ -1,4 +1,4 @@
-import { SigmaType } from "preact-sigma";
+import { listen, SigmaType } from "preact-sigma";
 
 const SaveIndicator = new SigmaType<
   {
@@ -32,7 +32,7 @@ const SaveIndicator = new SigmaType<
 
 const indicator = new SaveIndicator();
 
-indicator.on("saved", ({ count }) => {
+listen(indicator, "saved", ({ count }) => {
   console.log(`Saved ${count} times`);
 });
 

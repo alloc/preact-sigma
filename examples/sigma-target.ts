@@ -8,7 +8,7 @@ const notifications = new SigmaTarget<{
   reset: void;
 }>();
 
-const stopSaved = notifications.on("saved", ({ id, title }) => {
+const stopSaved = listen(notifications, "saved", ({ id, title }) => {
   console.log(`Saved ${id}: ${title}`);
 });
 
