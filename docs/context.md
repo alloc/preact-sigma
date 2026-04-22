@@ -67,6 +67,16 @@
 - Use ordinary actions for routine writes. Reserve `sigma.getState(...)` and `sigma.replaceState(...)` for replay, reset, or undo-like flows on committed top-level state.
 - Prefer `listen(...)` for external event subscriptions. It works with sigma states, `SigmaTarget`, and DOM targets.
 - Put owned side effects in `.setup(...)`.
+- Use `sigma.subscribe(this, ...)` inside `.setup(...)` when a setup-owned side effect should react to future committed publishes. Return that cleanup so the subscription stops with setup.
+  ```ts
+  .setup(function () {
+    return [
+      sigma.subscribe(this, (change) => {
+        console.log(change.newState);
+      }),
+    ];
+  })
+  ```
 - Use `this.act(function () { ... })` for setup-owned callbacks that need action semantics.
 
 # Patterns to Avoid

@@ -2,6 +2,34 @@
 
 All notable changes to this project will be documented in this file.
 
+## v5.0.0
+
+### Breaking Changes
+
+- **Committed-state helpers moved under `sigma`:** The standalone `snapshot(...)` and `replaceState(...)` exports have been replaced by `sigma.getState(...)` and `sigma.replaceState(...)`. Signal access also moves from `instance.get(key)` to `sigma.getSignal(instance, key)`.
+- **Committed-state observation moved off `SigmaType`:** `SigmaType.observe(...)` has been removed. Observe publishes from an instance with `sigma.subscribe(instance, listener, options)` instead, or subscribe to one top-level state property or computed with `sigma.subscribe(instance, key, listener)`.
+- **Sigma events are no longer based on `EventTarget`:** Sigma-state instances and `SigmaTarget` no longer inherit from `EventTarget`. Direct `addEventListener(...)`, `removeEventListener(...)`, `dispatchEvent(...)`, and `instance.on(...)` usage must move to `listen(...)`, `useListener(...)`, `this.emit(...)` inside sigma actions, or `SigmaTarget.emit(...)` and `SigmaTarget.on(...)`.
+- **Observer type names changed:** `SigmaObserveChange` is now `SigmaChange`, and `SigmaObserveOptions` is now `SigmaSubscribeOptions`.
+
+### Added
+
+- **Persistence helpers:** `preact-sigma/persist` is a new subpath export for committed-state restore and persistence. It includes `restoreState(...)`, `restoreStateSync(...)`, `persistState(...)`, `bindPersistence(...)`, `bindPersistenceSync(...)`, and `pickStateCodec(...)`.
+- **Convenience re-exports:** The root package now re-exports `action` and `effect` from `@preact/signals`, plus `immerable` from `immer`.
+
+### Internal Improvements
+
+- **Listener model cleanup:** `listen(...)`, `useListener(...)`, sigma states, and `SigmaTarget` now share one typed listener registry instead of relying on DOM event objects for sigma-specific events.
+- **Helper typing cleanup:** The public helper surface is simpler and more consistent around `sigma.getSignal(...)`, `sigma.getState(...)`, `sigma.replaceState(...)`, and `sigma.subscribe(...)`.
+
+### Migration Guide
+
+- Replace `snapshot(instance)` with `sigma.getState(instance)`.
+- Replace `replaceState(instance, nextState)` with `sigma.replaceState(instance, nextState)`.
+- Replace `instance.get(key)` with `sigma.getSignal(instance, key)`.
+- Replace `type.observe(listener, options)` with `sigma.subscribe(instance, listener, options)` after creating the instance.
+- Replace `instance.on(name, listener)` and direct `EventTarget` usage on sigma objects with `listen(instance, name, listener)` or `SigmaTarget.on(name, listener)`.
+- Import persistence helpers from `preact-sigma/persist` when storage, restore sequencing, or partial persistence should stay outside the `SigmaType` definition.
+
 ## v4.0.0
 
 ### Breaking Changes
