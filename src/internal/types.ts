@@ -187,7 +187,7 @@ export type SigmaReadonly<T extends SigmaDefinition> = Simplify<
 export type SigmaChangeListener<
   T extends SigmaDefinition = SigmaDefinition,
   TWithPatches extends boolean = false,
-> = (this: SigmaReadonly<T>, change: SigmaChange<T["state"], TWithPatches>) => void;
+> = (change: SigmaChange<T["state"], TWithPatches>) => void;
 
 type EventMetadata<TEvents extends AnyEvents | undefined> = [undefined] extends [TEvents]
   ? {}
