@@ -10,7 +10,8 @@
     "ignoreDeprecations": "6.0",
     "baseUrl": ".",
     "paths": {
-      "preact-sigma": ["./src/index.ts"]
+      "preact-sigma": ["./src/index.ts"],
+      "preact-sigma/persist": ["./src/persist.ts"]
     },
     "allowImportingTsExtensions": true,
     "emitDeclarationOnly": true,

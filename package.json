@@ -18,6 +18,10 @@
     ".": {
       "types": "./dist/index.d.mts",
       "import": "./dist/index.mjs"
+    },
+    "./persist": {
+      "types": "./dist/persist.d.mts",
+      "import": "./dist/persist.mjs"
     }
   },
   "scripts": {

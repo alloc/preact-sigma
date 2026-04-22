@@ -12,8 +12,15 @@ export default defineConfig({
     },
   },
   resolve: {
-    alias: {
-      "preact-sigma": fileURLToPath(new URL("src/index.ts", import.meta.url)),
-    },
+    alias: [
+      {
+        find: "preact-sigma/persist",
+        replacement: fileURLToPath(new URL("src/persist.ts", import.meta.url)),
+      },
+      {
+        find: "preact-sigma",
+        replacement: fileURLToPath(new URL("src/index.ts", import.meta.url)),
+      },
+    ],
   },
 });
