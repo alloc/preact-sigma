@@ -1,6 +1,6 @@
 import { sigma } from "./internal/runtime.js";
 import type { Immutable } from "./immer.js";
-import type { SigmaDefinition, SigmaState } from "./internal/types.js";
+import type { InferSigmaStateDefinition, SigmaDefinition, SigmaState } from "./internal/types.js";
 
 type MaybePromise<T> = T | Promise<T>;
 type SnapshotOf<T extends SigmaState<any>> =
@@ -134,7 +134,7 @@ function applyRecord<T extends SigmaState<any>, TStored>(
     storedVersion: record.version,
   });
 
-  sigma.replaceState(instance, nextState);
+  sigma.replaceState(instance, nextState as Immutable<InferSigmaStateDefinition<T>["state"]>);
 
   return {
     status: "restored",
