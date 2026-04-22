@@ -11,8 +11,8 @@ import type {
   AnySigmaState,
   AnyState,
   Cleanup,
-  InferSigmaStateDefinition,
   SigmaChangeListener,
+  SigmaDefinition,
   SigmaSignals,
   SigmaState,
   SigmaSubscribeOptions,
@@ -522,39 +522,22 @@ function isPlainObject(value: unknown): value is object {
  */
 export const sigma = Object.freeze({
   /** Returns the underlying signal for a top-level state property or computed. */
-  getSignal: <
-    T extends SigmaState<any>,
-    TDefinition extends InferSigmaStateDefinition<T> = InferSigmaStateDefinition<T>,
-    TKey extends Extract<keyof SigmaSignals<TDefinition>, string> = Extract<
-      keyof SigmaSignals<TDefinition>,
-      string
-    >,
-  >(
-    publicInstance: T,
-    key: TKey,
+  getSignal: <T extends SigmaDefinition, K extends Extract<keyof SigmaSignals<T>, string>>(
+    publicInstance: SigmaState<T>,
+    key: K,
   ) => {
-    return (publicInstance as any)[signalPrefix + key] as ReadonlySignal<
-      SigmaSignals<TDefinition>[TKey]
-    >;
+    return (publicInstance as any)[signalPrefix + key] as ReadonlySignal<SigmaSignals<T>[K]>;
   },
 
   /** Returns a shallow snapshot of an instance's committed public state. */
-  getState: <
-    T extends SigmaState<any>,
-    TDefinition extends InferSigmaStateDefinition<T> = InferSigmaStateDefinition<T>,
-  >(
-    publicInstance: T,
-  ) => {
-    return snapshotState(getSigmaInternals(publicInstance)) as Immutable<TDefinition["state"]>;
+  getState: <T extends SigmaDefinition>(publicInstance: SigmaState<T>) => {
+    return snapshotState(getSigmaInternals(publicInstance)) as Immutable<T["state"]>;
   },
 
   /** Replaces an instance's committed public state from a snapshot object. */
-  replaceState: <
-    T extends SigmaState<any>,
-    TDefinition extends InferSigmaStateDefinition<T> = InferSigmaStateDefinition<T>,
-  >(
-    publicInstance: T,
-    nextState: Immutable<TDefinition["state"]>,
+  replaceState: <T extends SigmaDefinition>(
+    publicInstance: SigmaState<T>,
+    nextState: Immutable<T["state"]>,
   ) => {
     const instance = getSigmaInternals(publicInstance);
     if (!isPlainObject(nextState)) {
@@ -572,23 +555,10 @@ export const sigma = Object.freeze({
   },
 
   /** Subscribes to committed state changes or one top-level property signal. */
-  subscribe: <
-    T extends SigmaState<any>,
-    TDefinition extends InferSigmaStateDefinition<T> = InferSigmaStateDefinition<T>,
-    TKey extends Extract<keyof SigmaSignals<TDefinition>, string> = Extract<
-      keyof SigmaSignals<TDefinition>,
-      string
-    >,
-    TOptions extends SigmaSubscribeOptions | undefined = undefined,
-  >(
-    publicInstance: T,
-    keyOrListener:
-      | TKey
-      | SigmaChangeListener<
-          TDefinition,
-          TOptions extends { patches: true } ? true : false
-        >,
-    listenerOrOptions?: ((value: SigmaSignals<TDefinition>[TKey]) => void) | TOptions,
+  subscribe: ((
+    publicInstance: AnySigmaState,
+    keyOrListener: string | SigmaChangeListener,
+    listenerOrOptions?: ((value: unknown) => void) | SigmaSubscribeOptions,
   ): Cleanup => {
     const instance = getSigmaInternals(publicInstance);
 
@@ -598,7 +568,7 @@ export const sigma = Object.freeze({
 
     const options = listenerOrOptions as SigmaSubscribeOptions | undefined;
     const subscription = {
-      listener: keyOrListener as AnyFunction,
+      listener: keyOrListener,
       patches: options?.patches ?? false,
     };
 
@@ -615,6 +585,20 @@ export const sigma = Object.freeze({
         instance.patchSubscriptions -= 1;
       }
     };
+  }) as {
+    // Key-based subscribe
+    <T extends SigmaDefinition, K extends Extract<keyof SigmaSignals<T>, string>>(
+      publicInstance: SigmaState<T>,
+      key: K,
+      listener: (value: SigmaSignals<T>[K]) => void,
+    ): Cleanup;
+
+    // Root-level subscribe
+    <T extends SigmaDefinition, TOptions extends SigmaSubscribeOptions | undefined = undefined>(
+      publicInstance: SigmaState<T>,
+      listener: SigmaChangeListener<T, TOptions extends { patches: true } ? true : false>,
+      listenerOrOptions?: TOptions,
+    ): Cleanup;
   },
 });
 

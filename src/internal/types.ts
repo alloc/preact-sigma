@@ -186,7 +186,7 @@ export type SigmaReadonly<T extends SigmaDefinition> = Simplify<
 >;
 
 export type SigmaChangeListener<
-  T extends SigmaDefinition,
+  T extends SigmaDefinition = SigmaDefinition,
   TWithPatches extends boolean = false,
 > = (this: SigmaReadonly<T>, change: SigmaChange<T["state"], TWithPatches>) => void;
 
