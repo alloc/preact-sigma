@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { shouldSetup } from "./internal/runtime.js";
 import type { AnySigmaState, InferSetupArgs } from "./internal/types.js";
-import { InferEventType, listen, type InferListener } from "./listener.js";
+import { InferEventType, listen, type InferListener, type Listenable } from "./listener.js";
 
 /**
  * Creates one sigma-state instance for a component.
@@ -26,7 +26,7 @@ export function useSigma<T extends AnySigmaState>(create: () => T, setupArgs?: I
  * forcing the effect to resubscribe on every render.
  */
 export function useListener<
-  TTarget extends EventTarget | AnySigmaState,
+  TTarget extends Listenable | AnySigmaState,
   TEvent extends InferEventType<TTarget>,
 >(target: TTarget | null, name: TEvent, listener: InferListener<TTarget, TEvent>) {
   const listenerRef = useRef(listener);

@@ -1,12 +1,21 @@
 // Copied from: node_modules/.pnpm/immer@11.1.4/node_modules/immer/dist/immer.d.ts
 // Adapted to skip sigma-state instances.
-import { sigmaRefBrand } from "./internal/symbols.js";
+import { sigmaRefBrand, sigmaTargetBrand } from "./internal/symbols.js";
 import type { AnySigmaState } from "./internal/types.js";
 
 type PrimitiveType = number | string | boolean;
 
 /** Object types that should never be mapped */
-type AtomicObject = Function | Promise<any> | Date | RegExp | EventTarget | AnySigmaState;
+type AtomicObject =
+  | Function
+  | Promise<any>
+  | Date
+  | RegExp
+  | EventTarget
+  | AnySigmaState
+  | {
+      [sigmaTargetBrand]: unknown;
+    };
 
 /**
  * If the lib "ES2015.Collection" is not included in tsconfig.json,

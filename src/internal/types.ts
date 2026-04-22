@@ -1,11 +1,17 @@
-import type { ReadonlySignal } from "@preact/signals";
 import type { Patch } from "immer";
-import { EventParameters } from "src/listener.js";
 import type { SigmaType } from "../framework.js";
 import type { Draft, Immutable } from "../immer.js";
-import { sigmaEventsBrand, sigmaRefBrand, sigmaStateBrand, sigmaTypeBrand } from "./symbols.js";
+import type { EventParameters, SigmaListenerMap } from "../listener.js";
+import {
+  sigmaEventsBrand,
+  sigmaRefBrand,
+  sigmaStateBrand,
+  sigmaTargetBrand,
+  sigmaTypeBrand,
+} from "./symbols.js";
 
 type Def = typeof sigmaTypeBrand;
+declare const sigmaDefinitionBrand: unique symbol;
 
 export type AnyFunction = (...args: any[]) => any;
 
@@ -36,7 +42,7 @@ export type AnyDefaultState<TState extends object> = {
   [K in keyof TState]?: DefaultStateValue<TState[K]>;
 };
 
-/** A cleanup resource supported by `.setup(...)`, including function, `dispose()`, and `Symbol.dispose` cleanup. */
+/** A cleanup resource supported by setup handlers, including function, `dispose()`, and `Symbol.dispose` cleanup. */
 export type AnyResource = Cleanup | Disposable | DisposableLike | AbortController;
 
 type ComputedValues<TComputeds> = {
@@ -135,8 +141,9 @@ export type AnySigmaType = SigmaType<any, any, any> & {
 };
 
 /** The public shape shared by all sigma-state instances. */
-export interface AnySigmaState extends EventTarget {
+export interface AnySigmaState {
   readonly [sigmaStateBrand]: true;
+  readonly [sigmaTargetBrand]: SigmaListenerMap;
 }
 
 /** A sigma-state instance with a typed event map. */
@@ -144,14 +151,14 @@ export type AnySigmaStateWithEvents<TEvents extends AnyEvents> = AnySigmaState &
   readonly [sigmaEventsBrand]: TEvents;
 };
 
-/** Options accepted by `.observe(...)`. */
-export type SigmaObserveOptions = {
+/** Options accepted by `sigma.subscribe(instance, handler, options)`. */
+export type SigmaSubscribeOptions = {
   /** Includes Immer patches and inverse patches on the delivered change object. */
   patches?: boolean;
 };
 
-/** The change object delivered to `.observe(...)` listeners. */
-export type SigmaObserveChange<TState extends AnyState, TWithPatches extends boolean = false> = {
+/** The change object delivered to `sigma.subscribe(instance, handler)` listeners. */
+export type SigmaChange<TState extends AnyState, TWithPatches extends boolean = false> = {
   readonly newState: Immutable<TState>;
   readonly oldState: Immutable<TState>;
 } & (TWithPatches extends true
@@ -170,53 +177,43 @@ export type SigmaDefinition = {
   setupArgs?: any[];
 };
 
-interface SignalAccessors<T extends object> {
-  /** Returns the underlying signal for a top-level state property or computed. */
-  get<K extends keyof T>(key: K): ReadonlySignal<T[K]>;
-}
+export type SigmaSignals<T extends SigmaDefinition> = Simplify<
+  Immutable<T["state"]> & ComputedValues<T["computeds"]>
+>;
 
-type EventMethods<TEvents extends AnyEvents | undefined> = [undefined] extends [TEvents]
-  ? never
+export type SigmaReadonly<T extends SigmaDefinition> = Simplify<
+  SigmaSignals<T> & QueryMethods<T["queries"]>
+>;
+
+export type SigmaChangeListener<
+  T extends SigmaDefinition,
+  TWithPatches extends boolean = false,
+> = (this: SigmaReadonly<T>, change: SigmaChange<T["state"], TWithPatches>) => void;
+
+type EventMetadata<TEvents extends AnyEvents | undefined> = [undefined] extends [TEvents]
+  ? {}
   : {
       readonly [sigmaEventsBrand]: TEvents;
-      /** Registers a typed event listener and returns an unsubscribe function. */
-      on<TEvent extends string & keyof TEvents>(
-        name: TEvent,
-        listener: (...[detail]: EventParameters<TEvents[TEvent]>) => void,
-      ): Cleanup;
     };
 
 type SetupMethods<TSetupArgs extends any[] | undefined> = [TSetupArgs] extends [undefined]
-  ? never
+  ? {}
   : {
       /** Runs every registered setup handler and returns one cleanup function for the active setup. */
       setup(...args: Extract<TSetupArgs, any[]>): Cleanup;
     };
 
-// This lets an interface type extend InstanceType<typeof SigmaType>.
-type MapSigmaDefinition<T extends SigmaDefinition> = keyof T extends infer K
-  ? K extends "state"
-    ? Immutable<T[K]> & SignalAccessors<Immutable<T[K]>>
-    : K extends "computeds"
-      ? ComputedValues<T[K]> & SignalAccessors<ComputedValues<T[K]>>
-      : K extends "queries"
-        ? QueryMethods<T[K]>
-        : K extends "actions"
-          ? ActionMethods<T[K]>
-          : K extends "events"
-            ? EventMethods<T[K]>
-            : K extends "setupArgs"
-              ? SetupMethods<T[K]>
-              : never
-  : never;
-
-type UnionToIntersection<U> = (U extends any ? (k: U) => void : never) extends (k: infer I) => void
-  ? I
-  : never;
-
-/** The public instance shape produced by a configured sigma type, including signal access inferred from the definition. */
+/** The public instance shape produced by a configured sigma type. */
 export type SigmaState<T extends SigmaDefinition = SigmaDefinition> = AnySigmaState &
-  Simplify<UnionToIntersection<MapSigmaDefinition<T>>>;
+  Simplify<
+    SigmaSignals<T> &
+      QueryMethods<T["queries"]> &
+      ActionMethods<T["actions"]> &
+      EventMetadata<T["events"]> &
+      SetupMethods<T["setupArgs"]>
+  > & {
+    readonly [sigmaDefinitionBrand]?: T;
+  };
 
 type RequiredKeys<TObject extends object> = {
   [K in keyof TObject]-?: {} extends Pick<TObject, K> ? never : K;
@@ -249,6 +246,12 @@ export type InferSigmaDefinition<T extends SigmaType<any, any, any>> = Extract<
   Simplify<OmitEmpty<T[Def]>>,
   SigmaDefinition
 >;
+
+export type InferSigmaStateDefinition<T extends AnySigmaState> = T extends {
+  readonly [sigmaDefinitionBrand]?: infer TDefinition extends SigmaDefinition;
+}
+  ? TDefinition
+  : SigmaDefinition;
 
 /** Infers the `setup(...)` argument list for a sigma-state instance. */
 export type InferSetupArgs<T extends AnySigmaState> = T extends {

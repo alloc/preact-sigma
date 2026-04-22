@@ -1,4 +1,5 @@
-import { computed } from "@preact/signals";
+import { action, computed, effect } from "@preact/signals";
+import { immerable } from "immer";
 import {
   assertDefinitionKeyAvailable,
   buildActionMethod,
@@ -23,12 +24,11 @@ import type {
   InitialStateInput,
   ReadonlyContext,
   SetupContext,
-  SigmaObserveChange,
-  SigmaObserveOptions,
   SigmaState,
 } from "./internal/types.js";
 
-export { replaceState, setAutoFreeze, snapshot } from "./internal/runtime.js";
+export { setAutoFreeze, sigma } from "./internal/runtime.js";
+export { action, effect, immerable };
 
 export type {
   AnyDefaultState,
@@ -38,10 +38,10 @@ export type {
   AnySigmaStateWithEvents,
   AnyState,
   InferSetupArgs,
-  SigmaObserveChange,
-  SigmaObserveOptions,
+  SigmaChange,
   SigmaRef,
   SigmaState,
+  SigmaSubscribeOptions,
 } from "./internal/types.js";
 
 /** Checks whether a value is an instance created by a configured sigma type. */
@@ -62,7 +62,7 @@ export function query<TArgs extends any[], TResult>(fn: (this: void, ...args: TA
 
 /**
  * Builds sigma-state constructors by accumulating default state, computeds,
- * queries, observers, actions, and setup handlers.
+ * queries, actions, and setup handlers.
  *
  * State and event inference starts from `new SigmaType<TState, TEvents>()`.
  * Later builder methods infer names and types from the objects you pass to them.
@@ -84,8 +84,6 @@ export class SigmaType<
         static _computeFunctions: Record<string, AnyFunction> = Object.create(null);
         static _defaultState: Record<string, unknown> = Object.create(null);
         static _defaultStateKeys: string[] = [];
-        static _observeFunction: AnyFunction | null = null;
-        static _patchesEnabled: boolean = false;
         static _queryFunctions: Record<string, AnyFunction> = Object.create(null);
         static _setupFunction: AnyFunction | null = null;
 
@@ -167,34 +165,6 @@ export class SigmaType<
       });
     }
     return this as any;
-  }
-
-  /**
-   * Adds a committed-state observer.
-   *
-   * Observers run after successful publishes and can opt into Immer patches
-   * with `{ patches: true }`.
-   */
-  observe(
-    listener: (this: ReadonlyContext<this>, change: SigmaObserveChange<TState>) => void,
-    options?: SigmaObserveOptions & { patches?: false | undefined },
-  ): this;
-
-  observe(
-    listener: (this: ReadonlyContext<this>, change: SigmaObserveChange<TState, true>) => void,
-    options: SigmaObserveOptions & { patches: true },
-  ): this;
-
-  observe(
-    listener: (this: any, change: any) => void,
-    options?: SigmaObserveOptions & { patches?: boolean },
-  ) {
-    const type = getTypeInternals(this);
-    type._observeFunction = listener;
-    if (options?.patches) {
-      type._patchesEnabled = true;
-    }
-    return this;
   }
 
   /**

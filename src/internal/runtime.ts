@@ -2,8 +2,9 @@ import { batch, computed, type ReadonlySignal, Signal, signal, untracked } from 
 import type { Patch } from "immer";
 import * as immer from "immer";
 import type { Draft, Immutable } from "../immer";
+import { SigmaListenerMap } from "../listener.js";
 import { ContextOptions, getContext, getContextOwner, registerContextOwner } from "./context.js";
-import { reservedKeys, sigmaStateBrand, signalPrefix } from "./symbols.js";
+import { reservedKeys, sigmaStateBrand, sigmaTargetBrand, signalPrefix } from "./symbols.js";
 import type {
   AnyFunction,
   AnyResource,
@@ -11,11 +12,10 @@ import type {
   AnyState,
   Cleanup,
   InferSigmaStateDefinition,
-  SigmaObserveChange,
-  SigmaObserveOptions,
-  SigmaReadonly,
+  SigmaChangeListener,
   SigmaSignals,
   SigmaState,
+  SigmaSubscribeOptions,
 } from "./types.js";
 
 export type SigmaTypeInternals = {
@@ -181,6 +181,10 @@ export function readActionStateValue(owner: ActionOwner, key: string, options: C
   }
 
   return committedValue;
+}
+
+export function readActionComputedValue(owner: ActionOwner, key: string) {
+  return owner.instance.type._computeFunctions[key].call(getContext(owner, "computedDraftAware"));
 }
 
 export function setActionStateValue(owner: ActionOwner, key: string, value: unknown) {
@@ -502,6 +506,14 @@ function publishState(instance: SigmaInternals, finalized: FinalizedDraftResult)
   }
 }
 
+function isPlainObject(value: unknown): value is object {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
 /**
  * Utility helpers for sigma-state instances.
  *
@@ -545,12 +557,7 @@ export const sigma = Object.freeze({
     nextState: Immutable<TDefinition["state"]>,
   ) => {
     const instance = getSigmaInternals(publicInstance);
-    if (
-      nextState === null ||
-      typeof nextState !== "object" ||
-      Array.isArray(nextState) ||
-      ![Object.prototype, null].includes(Object.getPrototypeOf(nextState))
-    ) {
+    if (!isPlainObject(nextState)) {
       throw new Error("[preact-sigma] replaceState() requires a plain object snapshot");
     }
 
@@ -572,18 +579,15 @@ export const sigma = Object.freeze({
       keyof SigmaSignals<TDefinition>,
       string
     >,
-    TOptions extends SigmaObserveOptions | undefined = undefined,
+    TOptions extends SigmaSubscribeOptions | undefined = undefined,
   >(
     publicInstance: T,
     keyOrListener:
       | TKey
-      | ((
-          this: SigmaReadonly<TDefinition>,
-          change: SigmaObserveChange<
-            TDefinition["state"],
-            TOptions extends { patches: true } ? true : false
-          >,
-        ) => void),
+      | SigmaChangeListener<
+          TDefinition,
+          TOptions extends { patches: true } ? true : false
+        >,
     listenerOrOptions?: ((value: SigmaSignals<TDefinition>[TKey]) => void) | TOptions,
   ): Cleanup => {
     const instance = getSigmaInternals(publicInstance);
@@ -592,7 +596,7 @@ export const sigma = Object.freeze({
       return getSignal(instance, keyOrListener).subscribe(listenerOrOptions as AnyFunction);
     }
 
-    const options = listenerOrOptions as SigmaObserveOptions | undefined;
+    const options = listenerOrOptions as SigmaSubscribeOptions | undefined;
     const subscription = {
       listener: keyOrListener as AnyFunction,
       patches: options?.patches ?? false,
@@ -652,7 +656,9 @@ async function resolveAsyncActionResult(owner: ActionOwner, result: PromiseLike<
 }
 
 // oxlint-disable-next-line typescript/no-unsafe-declaration-merging
-export class Sigma extends EventTarget {
+export class Sigma {
+  readonly [sigmaTargetBrand] = new SigmaListenerMap();
+
   setup(...args: any[]): Cleanup {
     const instance = getSigmaInternals(this);
 

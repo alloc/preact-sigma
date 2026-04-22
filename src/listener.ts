@@ -1,8 +1,47 @@
-import { isSigmaState } from "./framework.js";
-import { sigmaEventsBrand } from "./internal/symbols.js";
-import type { AnyEvents } from "./internal/types.js";
+import { sigmaEventsBrand, sigmaTargetBrand } from "./internal/symbols.js";
+import type { AnyEvents, Cleanup } from "./internal/types.js";
 
-type InferEventMap<TTarget extends EventTarget> = TTarget extends {
+export type SigmaTargetLike = {
+  readonly [sigmaTargetBrand]: SigmaListenerMap;
+};
+
+export type Listenable = SigmaTargetLike | EventTarget;
+export type RawSigmaListener = (detail: unknown) => void;
+
+export class SigmaListenerMap extends Map<string, Set<RawSigmaListener>> {
+  emit(name: string, detail: unknown) {
+    const listeners = this.get(name);
+    if (!listeners?.size) {
+      return;
+    }
+    // oxlint-disable-next-line unicorn/no-useless-spread
+    for (const listener of [...listeners]) {
+      listener(detail);
+    }
+  }
+
+  addListener(name: string, listener: RawSigmaListener) {
+    let listeners = this.get(name);
+    if (!listeners) {
+      listeners = new Set();
+      this.set(name, listeners);
+    }
+    listeners.add(listener);
+  }
+
+  removeListener(name: string, listener: RawSigmaListener) {
+    const listeners = this.get(name);
+    if (!listeners) {
+      return;
+    }
+    listeners.delete(listener);
+    if (!listeners.size) {
+      this.delete(name);
+    }
+  }
+}
+
+type InferEventMap<TTarget extends Listenable> = TTarget extends {
   [sigmaEventsBrand]: infer TEvents extends AnyEvents;
 }
   ? TEvents
@@ -20,15 +59,17 @@ type InferEventMap<TTarget extends EventTarget> = TTarget extends {
               ? SVGSVGElementEventMap
               : TTarget extends SVGElement
                 ? SVGElementEventMap
-                : never;
+                : TTarget extends EventTarget
+                  ? Record<string, Event>
+                  : never;
 
 type InferListenerArgs<
   TEvents extends object,
-  TTarget extends EventTarget,
+  TTarget extends Listenable,
   TEvent extends string,
 > = [
   (TEvent extends keyof TEvents ? TEvents[TEvent] : never) extends infer TPayload
-    ? TTarget extends { [sigmaEventsBrand]: TEvents }
+    ? TTarget extends SigmaTargetLike
       ? [TPayload] extends [never]
         ? never
         : [TPayload] extends [void]
@@ -40,14 +81,14 @@ type InferListenerArgs<
     : never,
 ];
 
-/** Infers the listener callback shape for a target and event name. Sigma states receive payloads directly, while DOM targets receive typed events. */
-export type InferListener<TTarget extends EventTarget, TEvent extends string = string> =
+/** Infers the listener callback shape for a target and event name. Sigma targets receive payloads directly, while DOM targets receive typed events. */
+export type InferListener<TTarget extends Listenable, TEvent extends string = string> =
   InferEventMap<TTarget> extends infer TEvents extends object
     ? ((...args: InferListenerArgs<TEvents, TTarget, TEvent>) => void) & { __eventType?: TEvent }
     : never;
 
 /** Infers the event names accepted by `listen(...)` or `useListener(...)` for a target. */
-export type InferEventType<TTarget extends EventTarget> =
+export type InferEventType<TTarget extends Listenable> =
   | (InferListener<TTarget> extends { __eventType?: infer TEvent } ? string & TEvent : never)
   | (string & {});
 
@@ -59,23 +100,25 @@ export type EventParameters<T> = [void] extends [T]
     : [detail: T];
 
 /**
- * A standalone typed event hub with `emit(...)` and `on(...)` methods and full
- * `EventTarget`, `listen(...)`, and `useListener(...)` compatibility.
+ * A standalone typed event hub with `emit(...)` and `on(...)` methods.
+ *
+ * `SigmaTarget` also works with `listen(...)` and `useListener(...)`.
  */
-export class SigmaTarget<TEvents extends AnyEvents = {}> extends EventTarget {
+export class SigmaTarget<TEvents extends AnyEvents = {}> {
   declare readonly [sigmaEventsBrand]: TEvents;
+  readonly [sigmaTargetBrand] = new SigmaListenerMap();
 
   /**
    * Emits a typed event from the hub.
    *
-   * Void events dispatch a plain `Event`. Payload events dispatch a
-   * `CustomEvent` whose `detail` holds the payload.
+   * Void events notify listeners with `undefined`. Payload events pass their
+   * payload directly to listeners.
    */
   emit<TEvent extends string & keyof TEvents>(
     name: TEvent,
     ...[detail]: EventParameters<TEvents[TEvent]>
   ) {
-    this.dispatchEvent(detail === undefined ? new Event(name) : new CustomEvent(name, { detail }));
+    this[sigmaTargetBrand].emit(name, detail);
   }
 
   /**
@@ -88,33 +131,33 @@ export class SigmaTarget<TEvents extends AnyEvents = {}> extends EventTarget {
     name: TEvent,
     listener: (...args: InferListenerArgs<TEvents, this, TEvent>) => void,
   ) {
-    const adapter: EventListener = (event) =>
-      // @ts-expect-error
-      listener(event.detail);
-
-    this.addEventListener(name, adapter);
+    this[sigmaTargetBrand].addListener(name, listener as RawSigmaListener);
     return () => {
-      this.removeEventListener(name, adapter);
+      this[sigmaTargetBrand].removeListener(name, listener as RawSigmaListener);
     };
   }
 }
 
-/** Adds a listener to a sigma state, `SigmaTarget`, or DOM target and returns a cleanup function that removes it. */
-export function listen<TTarget extends EventTarget, TEvent extends InferEventType<TTarget>>(
+/** Adds a listener to a sigma target or DOM target and returns a cleanup function that removes it. */
+export function listen<TTarget extends Listenable, TEvent extends InferEventType<TTarget>>(
   target: TTarget,
   name: TEvent,
   listener: InferListener<TTarget, TEvent>,
-) {
-  const adapter: EventListener =
-    isSigmaState(target) || target instanceof SigmaTarget
-      ? (event) =>
-          // @ts-expect-error
-          listener(event.detail)
-      : // @ts-expect-error
-        (listener as EventListener);
+): Cleanup;
 
-  target.addEventListener(name, adapter);
+export function listen(target: Listenable, name: string, listener: (event: unknown) => void) {
+  if (Object.hasOwn(target, sigmaTargetBrand)) {
+    const sigmaTarget = target as SigmaTargetLike;
+    sigmaTarget[sigmaTargetBrand].addListener(name, listener);
+    return () => {
+      sigmaTarget[sigmaTargetBrand].removeListener(name, listener);
+    };
+  }
+
+  const eventTarget = target as EventTarget;
+  const eventListener = listener as EventListener;
+  eventTarget.addEventListener(name, eventListener);
   return () => {
-    target.removeEventListener(name, adapter);
+    eventTarget.removeEventListener(name, eventListener);
   };
 }

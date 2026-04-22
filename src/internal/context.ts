@@ -10,6 +10,7 @@ import {
   type ActionOwner,
   type SigmaInternals,
 } from "./runtime.js";
+import { sigmaTargetBrand } from "./symbols.js";
 import type { AnySigmaState } from "./types.js";
 
 type PublicContextKind = "computedReadonly" | "observe" | "queryCommitted" | "setup";
@@ -163,10 +164,10 @@ function createContext(
         return options.allowEmit && owner
           ? (name: string, detail?: unknown) => {
               // `emit()` is always a boundary: same-owner unpublished changes throw,
-              // and foreign drafts are resolved here before dispatching.
+              // and foreign drafts are resolved here before emitting.
               handleActionBoundary(owner, "emit");
 
-              instance.publicInstance.dispatchEvent(new CustomEvent(name, { detail }));
+              instance.publicInstance[sigmaTargetBrand].emit(name, detail);
             }
           : undefined;
       }
