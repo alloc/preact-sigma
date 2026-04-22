@@ -1,4 +1,4 @@
-import { effect, SigmaType } from "preact-sigma";
+import { effect, sigma, SigmaType } from "preact-sigma";
 
 const Counter = new SigmaType<{
   count: number;
@@ -20,7 +20,10 @@ const Counter = new SigmaType<{
 const counter = new Counter();
 
 const stop = effect(() => {
-  console.log(counter.get("count").value, counter.get("doubled").value);
+  console.log(
+    sigma.getSignal(counter, "count").value,
+    sigma.getSignal(counter, "doubled").value,
+  );
 });
 
 counter.increment();

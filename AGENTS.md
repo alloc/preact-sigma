@@ -10,6 +10,8 @@
   - Group related guidance together in docs. Do not combine unrelated recommendations into the same bullet, paragraph, or section item just to save space.
 - Import style
   - Prefer namespace imports for runtime helper modules when that avoids local aliasing, for example `import * as moduleName` instead of renamed imports.
+- Code structure
+  - Avoid single-use internal helper functions unless the extraction materially improves structure or readability.
 - Performance guidance
   - Avoid speculative performance memoization. Prefer plain derivation until benchmarks justify caching, and if one cached derivation is kept, make the tradeoff explicit.
   - Prefer simple parameters over one-off options objects on hot internal paths when a single boolean or scalar is enough.

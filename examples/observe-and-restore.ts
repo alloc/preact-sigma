@@ -1,13 +1,10 @@
-import { replaceState, SigmaType, snapshot } from "preact-sigma";
+import { sigma, SigmaType } from "preact-sigma";
 
 const TodoList = new SigmaType<{
   todos: string[];
 }>("TodoList")
   .defaultState({
     todos: [],
-  })
-  .observe(function (change) {
-    console.log(`${change.oldState.todos.length} -> ${change.newState.todos.length}`);
   })
   .actions({
     add(title: string) {
@@ -16,12 +13,17 @@ const TodoList = new SigmaType<{
   });
 
 const todoList = new TodoList();
+const stop = sigma.subscribe(todoList, (change) => {
+  console.log(`${change.oldState.todos.length} -> ${change.newState.todos.length}`);
+});
 
 todoList.add("Write docs");
 
-const saved = snapshot(todoList);
+const saved = sigma.getState(todoList);
 
 todoList.add("Ship release");
-replaceState(todoList, saved);
+sigma.replaceState(todoList, saved);
 
-console.log(snapshot(todoList).todos); // ["Write docs"]
+console.log(sigma.getState(todoList).todos); // ["Write docs"]
+
+stop();
