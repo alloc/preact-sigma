@@ -1,13 +1,9 @@
 import { sigmaEventsBrand, sigmaTargetBrand } from "./internal/symbols.js";
 import type { AnyEvents, Cleanup } from "./internal/types.js";
-
-/** Structural event-target shape used by `listen(...)` for sigma targets and sigma states. */
-export type SigmaTargetLike = {
-  readonly [sigmaTargetBrand]: SigmaListenerMap;
-};
+import { SigmaTarget } from "./v6.js";
 
 /** Target types supported by `listen(...)` and `useListener(...)`. */
-export type Listenable = SigmaTargetLike | EventTarget;
+export type Listenable = SigmaTarget | EventTarget;
 
 /** Untyped listener shape stored internally by `SigmaListenerMap`. */
 export type RawSigmaListener = (detail: unknown) => void;
@@ -106,45 +102,6 @@ export type EventParameters<T> = [void] extends [T]
   : [undefined] extends [T]
     ? [detail?: T]
     : [detail: T];
-
-/**
- * A standalone typed event hub with `emit(...)` and `on(...)` methods.
- *
- * `SigmaTarget` also works with `listen(...)` and `useListener(...)`.
- */
-export class SigmaTarget<TEvents extends AnyEvents = {}> {
-  declare readonly [sigmaEventsBrand]: TEvents;
-  readonly [sigmaTargetBrand] = new SigmaListenerMap();
-
-  /**
-   * Emits a typed event from the hub.
-   *
-   * Void events notify listeners with `undefined`. Payload events pass their
-   * payload directly to listeners.
-   */
-  emit<TEvent extends string & keyof TEvents>(
-    name: TEvent,
-    ...[detail]: EventParameters<TEvents[TEvent]>
-  ) {
-    this[sigmaTargetBrand].emit(name, detail);
-  }
-
-  /**
-   * Registers a typed event listener and returns an unsubscribe function.
-   *
-   * Payload events pass their payload directly to the listener. Void events
-   * call the listener with no arguments.
-   */
-  on<TEvent extends string & keyof TEvents>(
-    name: TEvent,
-    listener: (...args: InferListenerArgs<TEvents, this, TEvent>) => void,
-  ) {
-    this[sigmaTargetBrand].addListener(name, listener as RawSigmaListener);
-    return () => {
-      this[sigmaTargetBrand].removeListener(name, listener as RawSigmaListener);
-    };
-  }
-}
 
 /** Adds a listener to a sigma target or DOM target and returns a cleanup function that removes it. */
 export function listen<TTarget extends Listenable, TEvent extends InferEventType<TTarget>>(

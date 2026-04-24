@@ -22,6 +22,7 @@ export function setAutoFreeze(autoFreeze: boolean) {
 }
 
 const signalSuffix = "$";
+const refSymbol = Symbol("ref");
 const typeSymbol = Symbol("type");
 const instanceSymbol = Symbol("instance");
 const changeListenersMap = new WeakMap<Sigma<any>, Set<Function>>();
@@ -29,6 +30,10 @@ const patchListeners = new WeakSet<Function>();
 const initializedTypes = new WeakSet<Function>();
 const queries = new WeakSet<Function>();
 const emptySentinel: any = {};
+
+export type SigmaRef<T extends object = {}> = T & {
+  [refSymbol]?: true;
+};
 
 let activeInstance: Sigma<any> | null = null;
 let activeDraft: any;

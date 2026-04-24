@@ -1,7 +1,6 @@
 // Copied from: node_modules/.pnpm/immer@11.1.4/node_modules/immer/dist/immer.d.ts
 // Adapted to skip sigma-state instances.
-import { sigmaRefBrand, sigmaTargetBrand } from "./internal/symbols.js";
-import type { AnySigmaState } from "./internal/types.js";
+import { Sigma, SigmaRef } from "./v6.js";
 
 export {
   createDraft,
@@ -18,15 +17,13 @@ type PrimitiveType = number | string | boolean;
 
 /** Object types that should never be mapped */
 type AtomicObject =
+  | AbortController
+  | Date
+  | EventTarget
   | Function
   | Promise<any>
-  | Date
   | RegExp
-  | EventTarget
-  | AnySigmaState
-  | {
-      [sigmaTargetBrand]: unknown;
-    };
+  | Sigma<any>;
 
 /**
  * If the lib "ES2015.Collection" is not included in tsconfig.json,
@@ -47,12 +44,6 @@ type IfAvailable<T, Fallback = void> = true | false extends (T extends never ? t
  */
 type WeakReferences = IfAvailable<WeakMap<any, any>> | IfAvailable<WeakSet<any>>;
 
-type HasSigmaRefBrand<T> = [T] extends [object]
-  ? typeof sigmaRefBrand extends keyof T
-    ? true
-    : false
-  : false;
-
 type WritableDraft<T> = T extends any[]
   ? number extends T["length"]
     ? Draft<T[number]>[]
@@ -72,7 +63,7 @@ export type Draft<T> = T extends PrimitiveType
   ? T
   : T extends AtomicObject
     ? T
-    : HasSigmaRefBrand<T> extends true
+    : keyof SigmaRef extends keyof T
       ? T
       : T extends ReadonlyMap<infer K, infer V>
         ? Map<Draft<K>, Draft<V>>
@@ -93,7 +84,7 @@ export type Immutable<T> = T extends PrimitiveType
   ? T
   : T extends AtomicObject
     ? T
-    : HasSigmaRefBrand<T> extends true
+    : keyof SigmaRef extends keyof T
       ? T
       : T extends ReadonlyMap<infer K, infer V>
         ? ReadonlyMap<Immutable<K>, Immutable<V>>
