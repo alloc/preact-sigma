@@ -2,68 +2,122 @@ import { computed } from "@preact/signals";
 import { enablePatches } from "immer";
 import { assert, test } from "vitest";
 
-import {
-  immerable,
-  listen,
-  query,
-  setAutoFreeze,
-  sigma,
-  SigmaTarget,
-  SigmaType,
-  type SigmaState,
-} from "preact-sigma";
+import { listen, query, setAutoFreeze, sigma, Sigma, SigmaTarget } from "preact-sigma";
 
-test("sigma states expose readonly state, computeds, queries, and actions", () => {
-  type Todo = {
-    id: string;
-    title: string;
-    completed: boolean;
-  };
+type Todo = {
+  id: string;
+  title: string;
+  completed: boolean;
+};
 
-  type TodoListState = {
-    draft: string;
-    todos: Todo[];
-  };
+type TodoListState = {
+  draft: string;
+  todos: Todo[];
+};
 
-  type TodoListEvents = {
-    added: Todo;
-  };
+type TodoListEvents = {
+  added: Todo;
+  reset: void;
+};
 
-  const TodoList = new SigmaType<TodoListState, TodoListEvents>()
-    .defaultState({
+const todoListInitializers: Array<(this: TodoList) => void> = [];
+
+class TodoList extends SigmaTarget<TodoListEvents, TodoListState> {
+  declare draft: string;
+  declare todos: Todo[];
+
+  constructor() {
+    super({
       draft: "",
       todos: [],
-    })
-    .computed({
-      completedCount() {
-        return this.todos.filter((todo) => todo.completed).length;
-      },
-    })
-    .queries({
-      canAddTodo() {
-        return this.draft.trim().length > 0;
-      },
-    })
-    .actions({
-      addTodo() {
-        const todo = {
-          id: String(this.todos.length + 1),
-          title: this.draft,
-          completed: false,
-        };
-        this.todos.push(todo);
-        this.draft = "";
-        this.commit();
-        this.emit("added", todo);
-      },
-      setDraft(draft: string) {
-        this.draft = draft;
-      },
-      toggleFirstTodo() {
-        this.todos[0].completed = !this.todos[0].completed;
-      },
     });
+    for (const initializer of todoListInitializers) {
+      initializer.call(this);
+    }
+  }
 
+  get completedCount() {
+    return this.todos.filter((todo) => todo.completed).length;
+  }
+
+  canAddTodo() {
+    return this.draft.trim().length > 0;
+  }
+
+  addTodo() {
+    const todo = {
+      id: String(this.todos.length + 1),
+      title: this.draft,
+      completed: false,
+    };
+    this.todos.push(todo);
+    this.draft = "";
+    this.commit(function () {
+      this.emit("added", todo);
+    });
+  }
+
+  reset() {
+    this.todos = [];
+    this.commit(function () {
+      this.emit("reset");
+    });
+  }
+
+  setDraft(draft: string) {
+    this.draft = draft;
+  }
+
+  toggleFirstTodo() {
+    this.todos[0].completed = !this.todos[0].completed;
+  }
+}
+
+query(TodoList.prototype.canAddTodo, {
+  name: "canAddTodo",
+  addInitializer(initializer: (this: TodoList) => void) {
+    todoListInitializers.push(initializer);
+  },
+} as ClassMethodDecoratorContext<TodoList, TodoList["canAddTodo"]>);
+
+const counterInitializers: Array<(this: Counter) => void> = [];
+
+class Counter extends Sigma<{ count: number }> {
+  declare count: number;
+
+  constructor(count = 0) {
+    super({ count });
+    for (const initializer of counterInitializers) {
+      initializer.call(this);
+    }
+  }
+
+  get doubled() {
+    return this.count * 2;
+  }
+
+  isEven() {
+    return this.count % 2 === 0;
+  }
+
+  increment() {
+    this.count += 1;
+  }
+
+  incrementTwice() {
+    this.increment();
+    this.increment();
+  }
+}
+
+query(Counter.prototype.isEven, {
+  name: "isEven",
+  addInitializer(initializer: (this: Counter) => void) {
+    counterInitializers.push(initializer);
+  },
+} as ClassMethodDecoratorContext<Counter, Counter["isEven"]>);
+
+test("sigma classes expose readonly state, computeds, query decorators, and actions", () => {
   const todoList = new TodoList();
   const observedCounts = computed(() => todoList.completedCount);
   let addedTitle = "";
@@ -74,15 +128,15 @@ test("sigma states expose readonly state, computeds, queries, and actions", () =
   assert.equal(todoList.draft, "");
   assert.equal(todoList.canAddTodo(), false);
 
-  todoList.setDraft("Ship v2");
+  todoList.setDraft("Ship v6");
 
   assert.equal(todoList.canAddTodo(), true);
 
   todoList.addTodo();
 
-  assert.equal(addedTitle, "Ship v2");
+  assert.equal(addedTitle, "Ship v6");
   assert.equal(todoList.draft, "");
-  assert.equal(todoList.todos[0].title, "Ship v2");
+  assert.equal(todoList.todos[0].title, "Ship v6");
   assert.equal(observedCounts.value, 0);
 
   todoList.toggleFirstTodo();
@@ -100,97 +154,44 @@ test("sigma states expose readonly state, computeds, queries, and actions", () =
   stop();
 });
 
-test("sigma.getState returns committed public state and computed getters stay out of enumeration", () => {
-  const Counter = new SigmaType<{ count: number }>()
-    .defaultState({
-      count: 1,
-    })
-    .computed({
-      doubled() {
-        return this.count * 2;
-      },
-    })
-    .actions({
-      increment() {
-        this.count += 1;
-      },
-    });
-
-  const counter = new Counter();
+test("sigma.getState returns committed public state", () => {
+  const counter = new Counter(1);
 
   assert.deepEqual(sigma.getState(counter), { count: 1 });
   assert.equal(sigma.getSignal(counter, "count").value, 1);
-  assert.equal(sigma.getSignal(counter, "doubled").value, 2);
-  assert.deepEqual(Object.keys(counter), ["count"]);
-  assert.equal(
-    Object.getOwnPropertyDescriptor(Object.getPrototypeOf(counter), "doubled")?.enumerable,
-    false,
-  );
+  assert.equal(counter.doubled, 2);
+
+  counter.increment();
+
+  assert.deepEqual(sigma.getState(counter), { count: 2 });
+  assert.equal(counter.doubled, 4);
 });
 
-test("sigma.subscribe can observe one state property or computed signal", () => {
+test("sigma.subscribe observes full-state publishes and individual state properties", () => {
+  const observedStates: Array<{ base: number; next: number }> = [];
   const observedCounts: number[] = [];
-  const observedDoubles: number[] = [];
-
-  const Counter = new SigmaType<{ count: number }>()
-    .defaultState({
-      count: 0,
-    })
-    .computed({
-      doubled() {
-        return this.count * 2;
-      },
-    })
-    .actions({
-      increment() {
-        this.count += 1;
-      },
-    });
-
   const counter = new Counter();
+
+  const stopState = sigma.subscribe(counter, (nextState, baseState) => {
+    observedStates.push({
+      base: baseState.count,
+      next: nextState.count,
+    });
+  });
   const stopCount = sigma.subscribe(counter, "count", (count) => {
     observedCounts.push(count);
   });
-  const stopDoubled = sigma.subscribe(counter, "doubled", (doubled) => {
-    observedDoubles.push(doubled);
-  });
 
   counter.increment();
+  stopState();
   stopCount();
-  stopDoubled();
   counter.increment();
 
+  assert.deepEqual(observedStates, [{ base: 0, next: 1 }]);
   assert.deepEqual(observedCounts, [0, 1]);
-  assert.deepEqual(observedDoubles, [0, 2]);
 });
 
-test("listen unwraps sigma-state event payloads and supports void events", () => {
-  type Todo = {
-    id: string;
-    title: string;
-  };
-
-  const TodoList = new SigmaType<{ todos: Todo[] }, { added: Todo; reset: void }>()
-    .defaultState({
-      todos: [],
-    })
-    .actions({
-      addTodo(title: string) {
-        const todo = {
-          id: String(this.todos.length + 1),
-          title,
-        };
-        this.todos.push(todo);
-        this.commit();
-        this.emit("added", todo);
-      },
-      reset() {
-        this.todos = [];
-        this.commit();
-        this.emit("reset");
-      },
-    });
-
+test("listen unwraps sigma event payloads and supports void events", () => {
   const todoList = new TodoList();
   const observed: string[] = [];
 
@@ -201,191 +202,93 @@ test("listen unwraps sigma-state event payloads and supports void events", () =>
     observed.push("reset");
   });
 
-  todoList.addTodo("Ship v2");
+  todoList.setDraft("Ship v6");
+  todoList.addTodo();
   todoList.reset();
   stopAdded();
   stopReset();
-  todoList.addTodo("Ignored");
+  todoList.setDraft("Ignored");
+  todoList.addTodo();
   todoList.reset();
 
-  assert.deepEqual(observed, ["added:Ship v2", "reset"]);
+  assert.deepEqual(observed, ["added:Ship v6", "reset"]);
 });
 
-test("SigmaTarget works as a standalone typed event hub", () => {
-  const hub = new SigmaTarget<{
-    added: {
-      title: string;
-    };
-    reset: void;
-  }>();
-  const observed: string[] = [];
-
-  const stopAdded = hub.on("added", (payload) => {
-    observed.push(`on:${payload.title}`);
-  });
-  const stopObserved = listen(hub, "added", (payload) => {
-    observed.push(`listen:${payload.title}`);
-  });
-  const stopReset = listen(hub, "reset", () => {
-    observed.push("reset");
-  });
-
-  hub.emit("added", {
-    title: "Ship v2",
-  });
-  hub.emit("reset");
-  stopAdded();
-  stopObserved();
-  stopReset();
-  hub.emit("added", {
-    title: "Ignored",
-  });
-  hub.emit("reset");
-
-  assert.deepEqual(observed, ["on:Ship v2", "listen:Ship v2", "reset"]);
-});
-
-test("setup returns a single cleanup that owns nested resources", () => {
+test("setup returns a cleanup that owns resources in reverse order", () => {
   const observedEvents: string[] = [];
-  const abortController = new AbortController();
   const target = new EventTarget();
-  let functionCleanupCount = 0;
-  let disposeCleanupCount = 0;
-  let disposableCleanupCount = 0;
-  let childCleanupCount = 0;
+  const cleanupOrder: string[] = [];
 
-  const ChildState = new SigmaType<{ ready: boolean }>()
-    .defaultState({
-      ready: true,
-    })
-    .setup(function () {
+  class Child extends Sigma<{ ready: boolean }> {
+    declare ready: boolean;
+
+    constructor() {
+      super({ ready: true });
+    }
+
+    onSetup() {
       return [
         () => {
-          childCleanupCount += 1;
+          cleanupOrder.push("child");
         },
       ];
-    });
+    }
+  }
 
-  const ParentState = new SigmaType<{ ready: boolean }>()
-    .defaultState({
-      ready: false,
-    })
-    .setup(function () {
-      const child = new ChildState();
-      const stop = listen(target, "sigma-v2-ping", () => {
+  class Parent extends Sigma<{ ready: boolean }> {
+    declare ready: boolean;
+
+    constructor() {
+      super({ ready: false });
+    }
+
+    onSetup() {
+      const child = new Child();
+      const stop = listen(target, "sigma-v6-ping", () => {
         observedEvents.push("ping");
       });
 
       return [
         child.setup(),
         stop,
-        abortController,
         () => {
-          functionCleanupCount += 1;
-        },
-        {
-          dispose() {
-            disposeCleanupCount += 1;
-          },
-        },
-        {
-          [Symbol.dispose]() {
-            disposableCleanupCount += 1;
-          },
+          cleanupOrder.push("parent");
         },
       ];
-    });
-
-  const parent = new ParentState();
-  const cleanup = parent.setup();
-
-  target.dispatchEvent(new Event("sigma-v2-ping"));
-  cleanup();
-  target.dispatchEvent(new Event("sigma-v2-ping"));
-
-  assert.deepEqual(observedEvents, ["ping"]);
-  assert.equal(abortController.signal.aborted, true);
-  assert.equal(functionCleanupCount, 1);
-  assert.equal(disposeCleanupCount, 1);
-  assert.equal(disposableCleanupCount, 1);
-  assert.equal(childCleanupCount, 1);
-});
-
-test("setup handlers must return arrays", () => {
-  const Store = new SigmaType<{ count: number }>()
-    .defaultState({
-      count: 0,
-    })
-    .setup(function () {
-      return (() => {}) as unknown as [];
-    });
-
-  const store = new Store();
-
-  assert.throws(() => {
-    store.setup();
-  }, /must return an array/);
-});
-
-test("setup cleanup aggregates failures after running every cleanup resource", () => {
-  const events: string[] = [];
-  const firstError = new Error("first");
-  const lastError = new Error("last");
-
-  const Store = new SigmaType<{ count: number }>()
-    .defaultState({
-      count: 0,
-    })
-    .setup(function () {
-      return [
-        () => {
-          events.push("cleanup:first");
-          throw firstError;
-        },
-        () => {
-          events.push("cleanup:middle");
-        },
-        () => {
-          events.push("cleanup:last");
-          throw lastError;
-        },
-      ];
-    });
-
-  const store = new Store();
-  const cleanup = store.setup();
-
-  let thrown: unknown;
-  try {
-    cleanup();
-  } catch (error) {
-    thrown = error;
+    }
   }
 
-  assert.instanceOf(thrown, AggregateError);
-  assert.equal((thrown as AggregateError).message, "Failed to dispose one or more sigma resources");
-  assert.deepEqual((thrown as AggregateError).errors, [lastError, firstError]);
-  assert.deepEqual(events, ["cleanup:last", "cleanup:middle", "cleanup:first"]);
+  const parent = new Parent();
+  const cleanup = parent.setup();
+
+  target.dispatchEvent(new Event("sigma-v6-ping"));
+  cleanup();
+  target.dispatchEvent(new Event("sigma-v6-ping"));
+
+  assert.deepEqual(observedEvents, ["ping"]);
+  assert.deepEqual(cleanupOrder, ["parent", "child"]);
 });
 
 test("setup act runs an anonymous action with normal action semantics", () => {
   const observedCounts: number[] = [];
 
-  const Store = new SigmaType<{ count: number }, { changed: { count: number } }>()
-    .defaultState({
-      count: 0,
-    })
-    .setup(function (step: number) {
-      const nextCount = this.act(function () {
+  class Store extends SigmaTarget<{ changed: { count: number } }, { count: number }> {
+    declare count: number;
+
+    constructor() {
+      super({ count: 0 });
+    }
+
+    onSetup(step: number) {
+      this.act(function () {
         this.count += step;
         this.commit();
         this.emit("changed", { count: this.count });
-        return this.count;
       });
 
-      assert.equal(nextCount, step);
       return [];
-    });
+    }
+  }
 
   const store = new Store();
   const stop = listen(store, "changed", ({ count }) => {
@@ -396,62 +299,51 @@ test("setup act runs an anonymous action with normal action semantics", () => {
 
   assert.equal(store.count, 2);
   assert.deepEqual(observedCounts, [2]);
-  assert.equal((store as any).act, undefined);
+  assert.throws(() => {
+    store.act(function () {});
+  }, /outside an onSetup/);
 
   stop();
 });
 
 test("setup act callbacks must stay synchronous", () => {
-  const Store = new SigmaType<{ count: number }>()
-    .defaultState({
-      count: 0,
-    })
-    .setup(function () {
+  class Store extends Sigma<{ count: number }> {
+    declare count: number;
+
+    constructor() {
+      super({ count: 0 });
+    }
+
+    onSetup() {
       this.act(async function () {
         this.count += 1;
       });
       return [];
-    });
+    }
+  }
 
   const store = new Store();
 
   assert.throws(() => {
     store.setup();
-  }, /act\(\) callbacks must stay synchronous/);
+  }, /act\(\) callbacks must be synchronous/);
   assert.equal(store.count, 0);
 });
 
 test("actions reuse one draft and can call queries, computeds, and other actions", () => {
-  const Counter = new SigmaType<{ count: number }>()
-    .defaultState({
-      count: 0,
-    })
-    .computed({
-      doubled() {
-        return this.count * 2;
-      },
-    })
-    .queries({
-      isEven() {
-        return this.count % 2 === 0;
-      },
-    })
-    .actions({
-      increment() {
-        this.count += 1;
-      },
-      incrementTwice() {
-        this.increment();
-        assert.equal(this.count, 1);
-        assert.equal(this.doubled, 2);
-        assert.equal(this.isEven(), false);
-        this.increment();
-      },
-    });
+  class ReentrantCounter extends Counter {
+    incrementTwiceWithChecks() {
+      this.increment();
+      assert.equal(this.count, 1);
+      assert.equal(this.doubled, 2);
+      assert.equal(this.isEven(), false);
+      this.increment();
+    }
+  }
 
-  const counter = new Counter();
+  const counter = new ReentrantCounter();
 
-  counter.incrementTwice();
+  counter.incrementTwiceWithChecks();
 
   assert.equal(counter.count, 2);
   assert.equal(counter.doubled, 4);
@@ -461,21 +353,17 @@ test("actions reuse one draft and can call queries, computeds, and other actions
 test("commit publishes an explicit boundary inside sync actions", () => {
   const observed: number[] = [];
 
-  const Counter = new SigmaType<{ count: number }>()
-    .defaultState({
-      count: 0,
-    })
-    .actions({
-      incrementTwice() {
-        this.count += 1;
-        this.commit();
-        this.count += 1;
-      },
-    });
+  class BoundaryCounter extends Counter {
+    incrementTwice() {
+      this.count += 1;
+      this.commit();
+      this.count += 1;
+    }
+  }
 
-  const counter = new Counter();
-  const stop = sigma.subscribe(counter, (change) => {
-    observed.push(change.newState.count);
+  const counter = new BoundaryCounter();
+  const stop = sigma.subscribe(counter, (nextState) => {
+    observed.push(nextState.count);
   });
 
   counter.incrementTwice();
@@ -485,82 +373,44 @@ test("commit publishes an explicit boundary inside sync actions", () => {
   stop();
 });
 
-test("non-async actions that return promises throw and discard draft changes", () => {
-  const Counter = new SigmaType<{ count: number }>()
-    .defaultState({
-      count: 0,
-    })
-    .actions({
-      incrementLater() {
-        this.count += 1;
-        return Promise.resolve();
-      },
-    });
+test("actions that return promises must commit before returning", () => {
+  class PromiseCounter extends Counter {
+    incrementLater() {
+      this.count += 1;
+      return Promise.resolve();
+    }
+  }
 
-  const counter = new Counter();
+  const counter = new PromiseCounter();
 
   assert.throws(() => {
     counter.incrementLater();
-  }, /must use native async-await syntax to return a promise/);
-  assert.equal(counter.count, 0);
-});
-
-test("async actions auto-commit sync work and reject when they settle with unpublished changes", async () => {
-  const Counter = new SigmaType<{ count: number }>()
-    .defaultState({
-      count: 0,
-    })
-    .actions({
-      async incrementLater() {
-        this.count += 1;
-        await Promise.resolve();
-        this.count += 1;
-      },
-    });
-
-  const counter = new Counter();
-
-  const pending = counter.incrementLater();
-
-  assert.equal(counter.count, 1);
-  await pending.then(
-    () => {
-      assert.fail("Expected incrementLater() to reject");
-    },
-    (error) => {
-      assert.match(String(error), /finished with unpublished changes/);
-    },
-  );
+  }, /forgot to commit\(\) its draft before returning a promise/);
   assert.equal(counter.count, 1);
 });
 
 test("async actions can commit after await", async () => {
   const observed: number[] = [];
 
-  const Counter = new SigmaType<{ count: number }>()
-    .defaultState({
-      count: 0,
-    })
-    .actions({
-      async incrementLater() {
-        this.count += 1;
-        await Promise.resolve();
-        this.count += 1;
-        this.commit();
-      },
-    });
+  class AsyncCounter extends Counter {
+    async incrementLater() {
+      await Promise.resolve();
+      this.count += 1;
+      this.commit();
+    }
+  }
 
-  const counter = new Counter();
-  const stop = sigma.subscribe(counter, (change) => {
-    observed.push(change.newState.count);
+  const counter = new AsyncCounter();
+  const stop = sigma.subscribe(counter, (nextState) => {
+    observed.push(nextState.count);
   });
   const pending = counter.incrementLater();
 
-  assert.equal(counter.count, 1);
+  assert.equal(counter.count, 0);
   await pending;
 
-  assert.equal(counter.count, 2);
-  assert.deepEqual(observed, [1, 2]);
+  assert.equal(counter.count, 1);
+  assert.deepEqual(observed, [1]);
   stop();
 });
 
@@ -569,28 +419,18 @@ test("sigma.replaceState restores committed state and notifies subscribers", () 
 
   const observed: Array<{
     count: number;
-    inversePatches: unknown[];
-    patches: unknown[];
+    inversePatches: unknown[] | undefined;
+    patches: unknown[] | undefined;
   }> = [];
-
-  const Counter = new SigmaType<{ count: number }>()
-    .defaultState({
-      count: 0,
-    })
-    .actions({
-      increment() {
-        this.count += 1;
-      },
-    });
 
   const counter = new Counter();
   const stop = sigma.subscribe(
     counter,
-    (change) => {
+    (nextState, _baseState, patches, inversePatches) => {
       observed.push({
-        count: change.newState.count,
-        inversePatches: [...change.inversePatches],
-        patches: [...change.patches],
+        count: nextState.count,
+        inversePatches: inversePatches && [...inversePatches],
+        patches: patches && [...patches],
       });
     },
     { patches: true },
@@ -602,57 +442,26 @@ test("sigma.replaceState restores committed state and notifies subscribers", () 
 
   assert.equal(counter.count, 0);
   assert.lengthOf(observed, 2);
-  assert.sameDeepMembers(observed[1].inversePatches, [
+  assert.sameDeepMembers(observed[1].inversePatches ?? [], [
     { op: "replace", path: ["count"], value: 1 },
   ]);
-  assert.sameDeepMembers(observed[1].patches, [{ op: "replace", path: ["count"], value: 0 }]);
+  assert.sameDeepMembers(observed[1].patches ?? [], [{ op: "replace", path: ["count"], value: 0 }]);
   stop();
 });
 
-test("sigma.replaceState validates snapshot shape", () => {
-  const Search = new SigmaType<{
-    draft: string;
-    page: number;
-  }>().defaultState({
-    draft: "",
-    page: 1,
-  });
-
-  const search = new Search();
+test("sigma.replaceState requires a plain object snapshot", () => {
+  const counter = new Counter();
 
   assert.throws(() => {
-    sigma.replaceState(search, [] as unknown as { draft: string; page: number });
+    sigma.replaceState(counter, [] as unknown as { count: number });
   }, /requires a plain object snapshot/);
-
-  assert.throws(() => {
-    sigma.replaceState(search, { draft: "" } as unknown as { draft: string; page: number });
-  }, /Missing: page/);
-
-  assert.throws(() => {
-    sigma.replaceState(search, {
-      draft: "",
-      extra: true,
-      page: 1,
-    } as unknown as { draft: string; page: number });
-  }, /Extra: extra/);
 });
 
 test("sigma.replaceState is a no-op for the current committed snapshot", () => {
   const observed: number[] = [];
-
-  const Counter = new SigmaType<{ count: number }>()
-    .defaultState({
-      count: 0,
-    })
-    .actions({
-      increment() {
-        this.count += 1;
-      },
-    });
-
   const counter = new Counter();
-  const stop = sigma.subscribe(counter, (change) => {
-    observed.push(change.newState.count);
+  const stop = sigma.subscribe(counter, (nextState) => {
+    observed.push(nextState.count);
   });
   const initial = sigma.getState(counter);
 
@@ -674,20 +483,16 @@ test("sigma.replaceState throws while an async action has unpublished changes", 
     release = resolve;
   });
 
-  const Counter = new SigmaType<{ count: number }>()
-    .defaultState({
-      count: 0,
-    })
-    .actions({
-      async stageIncrement() {
-        await Promise.resolve();
-        this.count += 1;
-        await blocked;
-        this.commit();
-      },
-    });
+  class AsyncCounter extends Counter {
+    async stageIncrement() {
+      await Promise.resolve();
+      this.count += 1;
+      await blocked;
+      this.commit();
+    }
+  }
 
-  const counter = new Counter();
+  const counter = new AsyncCounter();
   const pending = counter.stageIncrement();
 
   await Promise.resolve();
@@ -695,220 +500,11 @@ test("sigma.replaceState throws while an async action has unpublished changes", 
 
   assert.throws(() => {
     sigma.replaceState(counter, sigma.getState(counter));
-  }, /stageIncrement/);
+  }, /replaceState\(\) cannot run while an action has unpublished changes/);
 
   release();
   await pending;
   assert.equal(counter.count, 1);
-});
-
-test("async actions throw when they cross a boundary with unpublished changes", async () => {
-  const Counter = new SigmaType<{ count: number }, { ignored: void }>()
-    .defaultState({
-      count: 0,
-    })
-    .actions({
-      increment() {
-        this.count += 1;
-      },
-      async incrementLater() {
-        await Promise.resolve();
-        this.count += 1;
-        this.commit();
-      },
-      async emitAfterWrite() {
-        await Promise.resolve();
-        this.count += 1;
-        this.emit("ignored");
-      },
-      async callAsyncActionAfterWrite() {
-        await Promise.resolve();
-        this.count += 1;
-        await this.incrementLater();
-      },
-      async callSyncActionAfterWrite() {
-        await Promise.resolve();
-        this.count += 1;
-        this.increment();
-        this.commit();
-      },
-      emitAfterWriteSync() {
-        this.count += 1;
-        this.emit("ignored");
-      },
-    });
-
-  const counter = new Counter();
-
-  await counter.emitAfterWrite().then(
-    () => {
-      assert.fail("Expected emitAfterWrite() to reject");
-    },
-    (error) => {
-      assert.match(String(error), /before emit/);
-    },
-  );
-  assert.equal(counter.count, 0);
-
-  await counter.callAsyncActionAfterWrite().then(
-    () => {
-      assert.fail("Expected callAsyncActionAfterWrite() to reject");
-    },
-    (error) => {
-      assert.match(String(error), /before calling another action/);
-    },
-  );
-  assert.equal(counter.count, 0);
-
-  await counter.callSyncActionAfterWrite();
-  assert.equal(counter.count, 2);
-
-  assert.throws(() => {
-    counter.emitAfterWriteSync();
-  }, /before emit/);
-  assert.equal(counter.count, 2);
-});
-
-test("foreign actions warn and discard unpublished changes", async () => {
-  const warnings: unknown[][] = [];
-  const originalWarn = console.warn;
-  let release!: () => void;
-  const blocked = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-
-  const Counter = new SigmaType<{ count: number }>()
-    .defaultState({
-      count: 0,
-    })
-    .actions({
-      increment() {
-        this.count += 1;
-      },
-      async stageIncrement() {
-        await Promise.resolve();
-        this.count += 1;
-        await blocked;
-      },
-    });
-
-  const counter = new Counter();
-  console.warn = (...args: unknown[]) => {
-    warnings.push(args);
-  };
-
-  try {
-    const pending = counter.stageIncrement();
-    await Promise.resolve();
-    await Promise.resolve();
-
-    counter.increment();
-    release();
-    await pending;
-
-    assert.equal(counter.count, 1);
-    assert.lengthOf(warnings, 1);
-    assert.match(String(warnings[0][0]), /Discarded unpublished action changes/);
-  } finally {
-    console.warn = originalWarn;
-  }
-});
-
-test("same-instance async actions can start from another action when no draft is open", async () => {
-  const Counter = new SigmaType<{ count: number }>()
-    .defaultState({
-      count: 0,
-    })
-    .actions({
-      increment() {
-        this.count += 1;
-      },
-      async incrementLater() {
-        await Promise.resolve();
-        this.increment();
-        this.commit();
-      },
-      async incrementTwice() {
-        const first = this.incrementLater();
-        const second = this.incrementLater();
-        await first;
-        await second;
-      },
-    });
-
-  const counter = new Counter();
-
-  await counter.incrementTwice();
-
-  assert.equal(counter.count, 2);
-});
-
-test("sigma.subscribe runs after committed base-state changes from setup", () => {
-  const observed: Array<{
-    count: number;
-    doubled: number;
-    hasCount: boolean;
-    previousCount: number;
-    stateCount: number;
-  }> = [];
-
-  const Counter = new SigmaType<{ count: number }>()
-    .defaultState({
-      count: 0,
-    })
-    .computed({
-      doubled() {
-        return this.count * 2;
-      },
-    })
-    .queries({
-      hasCount() {
-        return this.count > 0;
-      },
-    })
-    .setup(function () {
-      return [
-        sigma.subscribe(this, function (change) {
-          observed.push({
-            count: this.count,
-            doubled: this.doubled,
-            hasCount: this.hasCount(),
-            previousCount: change.oldState.count,
-            stateCount: change.newState.count,
-          });
-        }),
-      ];
-    })
-    .actions({
-      increment() {
-        this.count += 1;
-      },
-      incrementTwice() {
-        this.increment();
-        this.increment();
-      },
-      noop() {},
-    });
-
-  const counter = new Counter();
-  const cleanup = counter.setup();
-
-  counter.noop();
-  assert.deepEqual(observed, []);
-
-  counter.incrementTwice();
-
-  assert.deepEqual(observed, [
-    {
-      count: 2,
-      doubled: 4,
-      hasCount: true,
-      previousCount: 0,
-      stateCount: 2,
-    },
-  ]);
-
-  cleanup();
 });
 
 test("sigma.subscribe can include immer patches when enabled by the app", () => {
@@ -919,28 +515,30 @@ test("sigma.subscribe can include immer patches when enabled by the app", () => 
     patches: unknown[];
   }> = [];
 
-  const Search = new SigmaType<{
-    draft: string;
-    tags: string[];
-  }>()
-    .defaultState({
-      draft: "",
-      tags: [],
-    })
-    .actions({
-      update() {
-        this.draft = "hello";
-        this.tags.push("sigma");
-      },
-    });
+  class Search extends Sigma<{ draft: string; tags: string[] }> {
+    declare draft: string;
+    declare tags: string[];
+
+    constructor() {
+      super({
+        draft: "",
+        tags: [],
+      });
+    }
+
+    update() {
+      this.draft = "hello";
+      this.tags.push("sigma");
+    }
+  }
 
   const search = new Search();
   const stop = sigma.subscribe(
     search,
-    (change) => {
+    (_nextState, _baseState, patches, inversePatches) => {
       observed.push({
-        inversePatches: [...change.inversePatches],
-        patches: [...change.patches],
+        inversePatches: [...inversePatches],
+        patches: [...patches],
       });
     },
     { patches: true },
@@ -960,105 +558,27 @@ test("sigma.subscribe can include immer patches when enabled by the app", () => 
   stop();
 });
 
-test("external query helpers isolate caller tracking", () => {
-  const hasText = query((value: string) => value.trim().length > 0);
-  const Search = new SigmaType<{ draft: string }>()
-    .defaultState({
-      draft: "",
-    })
-    .actions({
-      setDraft(value: string) {
-        this.draft = value;
-      },
-    });
+test("nested sigma states can be stored in state without being mutated through parent actions", () => {
+  const child = new Counter();
 
-  const search = new Search();
-  const result = computed(() => hasText(search.draft));
-
-  assert.equal(result.value, false);
-  search.setDraft("hello");
-  assert.equal(result.value, true);
-});
-
-test("initial state shallowly overrides defaults", () => {
-  const Search = new SigmaType<{
-    page: number;
-    query: string;
-  }>().defaultState({
-    page: 1,
-    query: "",
-  });
-
-  const search = new Search({
-    query: "typed",
-  });
-
-  assert.equal(search.page, 1);
-  assert.equal(search.query, "typed");
-});
-
-test("function-valued defaults run once per instance when needed", () => {
-  let idDefaultCalls = 0;
-  let tagsDefaultCalls = 0;
-
-  const Search = new SigmaType<{
-    id: number;
-    tags: string[];
-  }>().defaultState({
-    id() {
-      idDefaultCalls += 1;
-      return idDefaultCalls;
-    },
-    tags: () => {
-      tagsDefaultCalls += 1;
-      return [];
-    },
-  });
-
-  const first = new Search();
-  const second = new Search();
-  const overridden = new Search({
-    id: 99,
-  });
-
-  assert.equal(first.id, 1);
-  assert.equal(second.id, 2);
-  assert.equal(overridden.id, 99);
-  assert.equal(idDefaultCalls, 2);
-  assert.equal(tagsDefaultCalls, 3);
-  assert.notStrictEqual(first.tags, second.tags);
-  assert.notStrictEqual(second.tags, overridden.tags);
-});
-
-test("nested sigma states can be stored in state without being mutated through actions", () => {
-  const Child = new SigmaType<{ count: number }>()
-    .defaultState({
-      count: 0,
-    })
-    .actions({
-      increment() {
-        this.count += 1;
-      },
-    });
-
-  const child = new Child();
-
-  const Parent = new SigmaType<{
-    child: SigmaState<{
-      state: { count: number };
-      actions: { increment(): void };
-    }>;
+  class Parent extends Sigma<{
+    child: Counter;
     label: string;
-  }>()
-    .defaultState({
-      child,
-      label: "parent",
-    })
-    .actions({
-      rename(label: string) {
-        this.label = label;
-      },
-    });
+  }> {
+    declare child: Counter;
+    declare label: string;
+
+    constructor() {
+      super({
+        child,
+        label: "parent",
+      });
+    }
+
+    rename(label: string) {
+      this.label = label;
+    }
+  }
 
   const parent = new Parent();
 
@@ -1069,80 +589,38 @@ test("nested sigma states can be stored in state without being mutated through a
   assert.equal(parent.child.count, 1);
 });
 
-test("top-level custom class instances stay mutable by reference unless marked immerable", () => {
-  class MutableCache {
-    count = 1;
-    entries = new Map([["a", 1]]);
-
-    increment() {
-      this.count += 1;
-    }
-
-    record(key: string, value: number) {
-      this.entries.set(key, value);
-    }
-  }
-
-  class DraftableCache {
-    [immerable] = true as const;
-    count = 1;
-
-    getCount() {
-      return this.count;
-    }
-  }
-
-  const Store = new SigmaType<{
-    mutableCache: MutableCache;
-    draftableCache: DraftableCache;
-  }>()
-    .defaultState({
-      mutableCache: () => new MutableCache(),
-      draftableCache: () => new DraftableCache(),
-    })
-    .actions({
-      incrementDraftableCache() {
-        this.draftableCache.count += 1;
-      },
-    });
-
-  const store = new Store();
-  const initialDraftableCache = store.draftableCache;
-
-  store.mutableCache.increment();
-  store.mutableCache.record("b", 2);
-  store.incrementDraftableCache();
-
-  assert.equal(store.mutableCache.count, 2);
-  assert.equal(store.mutableCache.entries.get("b"), 2);
-  assert.equal(initialDraftableCache.getCount(), 1);
-  assert.notStrictEqual(store.draftableCache, initialDraftableCache);
-  assert.equal(store.draftableCache.getCount(), 2);
-});
-
 test("setAutoFreeze controls deep runtime freezing of published state", () => {
-  const Store = new SigmaType<{
+  class Store extends Sigma<{
     config: {
       nested: {
         count: number;
       };
       tags: string[];
     };
-  }>()
-    .defaultState({
-      config: {
-        nested: { count: 1 },
-        tags: ["a"],
-      },
-    })
-    .actions({
-      replaceConfig() {
-        this.config = {
-          nested: { count: 2 },
-          tags: ["a", "b"],
-        };
-      },
-    });
+  }> {
+    declare config: {
+      nested: {
+        count: number;
+      };
+      tags: string[];
+    };
+
+    constructor() {
+      super({
+        config: {
+          nested: { count: 1 },
+          tags: ["a"],
+        },
+      });
+    }
+
+    replaceConfig() {
+      this.config = {
+        nested: { count: 2 },
+        tags: ["a", "b"],
+      };
+    }
+  }
 
   try {
     setAutoFreeze(true);

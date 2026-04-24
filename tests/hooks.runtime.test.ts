@@ -1,11 +1,10 @@
-// @ts-nocheck
 // @vitest-environment jsdom
 
 import { render, type FunctionComponent, h } from "preact";
 import { act } from "preact/test-utils";
 import { afterEach, assert, test } from "vitest";
 
-import { SigmaTarget, SigmaType, useListener, useSigma } from "preact-sigma";
+import { Sigma, SigmaTarget, useListener, useSigma, type Protected } from "preact-sigma";
 
 function createContainer() {
   const container = document.createElement("div");
@@ -17,35 +16,35 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
-test("useSigmaState initializes once, runs setup, and cleans up on unmount", async () => {
+test("useSigma initializes once, runs setup, and cleans up on unmount", async () => {
   const container = createContainer();
   let setupCount = 0;
   let cleanupCount = 0;
-  let state!: {
-    count: number;
-    increment(): void;
-  };
+  let state!: Protected<Counter>;
 
-  const Counter = new SigmaType<{ count: number }>()
-    .defaultState({
-      count: 0,
-    })
-    .setup(function () {
+  class Counter extends Sigma<{ count: number }> {
+    declare count: number;
+
+    constructor() {
+      super({ count: 0 });
+    }
+
+    onSetup() {
       setupCount += 1;
       return [
         () => {
           cleanupCount += 1;
         },
       ];
-    })
-    .actions({
-      increment() {
-        this.count += 1;
-      },
-    });
+    }
+
+    increment() {
+      this.count += 1;
+    }
+  }
 
   const Probe: FunctionComponent<{ id: string }> = () => {
-    state = useSigma(() => new Counter(), []);
+    state = useSigma(() => new Counter());
     return null;
   };
 
@@ -65,28 +64,30 @@ test("useSigmaState initializes once, runs setup, and cleans up on unmount", asy
   assert.equal(cleanupCount, 1);
 });
 
-test("useSigma reruns setup when setupArgs change and cleans up the previous run", async () => {
+test("useSigma reruns setup when setup args change and cleans up the previous run", async () => {
   const container = createContainer();
   const events: string[] = [];
-  let state!: {
-    count: number;
-  };
+  let state!: Protected<Counter>;
 
-  const Counter = new SigmaType<{ count: number }>()
-    .defaultState({
-      count: 0,
-    })
-    .setup(function (label: string) {
+  class Counter extends Sigma<{ count: number }> {
+    declare count: number;
+
+    constructor() {
+      super({ count: 0 });
+    }
+
+    onSetup(label: string) {
       events.push(`setup:${label}`);
       return [
         () => {
           events.push(`cleanup:${label}`);
         },
       ];
-    });
+    }
+  }
 
   const Probe: FunctionComponent<{ label: string }> = ({ label }) => {
-    state = useSigma(() => new Counter(), [label]);
+    state = useSigma(() => new Counter(), { setup: [label] });
     return null;
   };
 
@@ -111,36 +112,41 @@ test("useListener keeps the latest callback", async () => {
     label,
     target,
   }) => {
-    useListener(target, "sigma-v2-ping", (event: Event) => {
+    useListener(target, "sigma-v6-ping", (event: Event) => {
       observed.push(`${label}:${(event as CustomEvent<number>).detail}`);
     });
     return null;
   };
 
   await act(() => render(h(Probe, { label: "a", target: window }), container));
-  window.dispatchEvent(new CustomEvent("sigma-v2-ping", { detail: 1 }));
+  window.dispatchEvent(new CustomEvent("sigma-v6-ping", { detail: 1 }));
 
   await act(() => render(h(Probe, { label: "b", target: window }), container));
-  window.dispatchEvent(new CustomEvent("sigma-v2-ping", { detail: 2 }));
+  window.dispatchEvent(new CustomEvent("sigma-v6-ping", { detail: 2 }));
 
   await act(() => render(h(Probe, { label: "c", target: null }), container));
-  window.dispatchEvent(new CustomEvent("sigma-v2-ping", { detail: 3 }));
+  window.dispatchEvent(new CustomEvent("sigma-v6-ping", { detail: 3 }));
 
   assert.deepEqual(observed, ["a:1", "b:2"]);
 });
 
-test("useListener subscribes to SigmaTarget hubs", async () => {
+test("useListener subscribes to sigma targets", async () => {
   const container = createContainer();
   const observed: string[] = [];
-  const target = new SigmaTarget<{
-    ping: {
-      count: number;
-    };
-  }>();
+
+  class PingTarget extends SigmaTarget<{ ping: { count: number } }> {
+    ping(count: number) {
+      this.commit(function () {
+        this.emit("ping", { count });
+      });
+    }
+  }
+
+  const target = new PingTarget();
 
   const Probe: FunctionComponent<{
     label: string;
-    target: SigmaTarget<{ ping: { count: number } }> | null;
+    target: PingTarget | null;
   }> = ({ label, target }) => {
     useListener(target, "ping", (payload) => {
       observed.push(`${label}:${payload.count}`);
@@ -149,13 +155,13 @@ test("useListener subscribes to SigmaTarget hubs", async () => {
   };
 
   await act(() => render(h(Probe, { label: "a", target }), container));
-  target.emit("ping", { count: 1 });
+  target.ping(1);
 
   await act(() => render(h(Probe, { label: "b", target }), container));
-  target.emit("ping", { count: 2 });
+  target.ping(2);
 
   await act(() => render(h(Probe, { label: "c", target: null }), container));
-  target.emit("ping", { count: 3 });
+  target.ping(3);
 
   assert.deepEqual(observed, ["a:1", "b:2"]);
 });

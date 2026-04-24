@@ -1,38 +1,43 @@
-import { listen, SigmaType } from "preact-sigma";
+import { listen, SigmaTarget } from "preact-sigma";
 
-const SaveIndicator = new SigmaType<
-  {
-    savedCount: number;
-    saving: boolean;
-  },
-  {
-    saved: {
-      count: number;
-    };
+type SaveIndicatorState = {
+  savedCount: number;
+  saving: boolean;
+};
+
+type SaveIndicatorEvents = {
+  saved: {
+    count: number;
+  };
+};
+
+class SaveIndicator extends SigmaTarget<SaveIndicatorEvents, SaveIndicatorState> {
+  constructor() {
+    super({
+      savedCount: 0,
+      saving: false,
+    });
   }
->("SaveIndicator")
-  .defaultState({
-    savedCount: 0,
-    saving: false,
-  })
-  .actions({
-    async save() {
-      this.saving = true;
-      this.commit(); // Publish before the async boundary.
 
-      await Promise.resolve();
+  async save() {
+    this.saving = true;
+    this.commit(); // Publish before the async boundary.
 
-      this.savedCount += 1;
-      this.saving = false;
-      this.commit(); // Publish before emitting the event boundary.
+    await Promise.resolve();
 
-      this.emit("saved", { count: this.savedCount });
-    },
-  });
+    this.savedCount += 1;
+    this.saving = false;
+    this.commit(); // Publish before emitting the event boundary.
+
+    this.emit("saved", { count: this.savedCount });
+  }
+}
+
+interface SaveIndicator extends SaveIndicatorState {}
 
 const indicator = new SaveIndicator();
 
-listen(indicator, "saved", ({ count }) => {
+const stop = listen(indicator, "saved", ({ count }) => {
   console.log(`Saved ${count} times`);
 });
 
@@ -40,3 +45,5 @@ await indicator.save();
 
 console.log(indicator.saving); // false
 console.log(indicator.savedCount); // 1
+
+stop();

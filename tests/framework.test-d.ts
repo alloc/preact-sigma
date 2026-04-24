@@ -2,14 +2,12 @@ import type { Patch } from "immer";
 import { assertType, expectTypeOf, test } from "vitest";
 
 import {
-  action,
-  immerable,
   listen,
   query,
   setAutoFreeze,
   sigma,
+  Sigma,
   SigmaTarget,
-  SigmaType,
   useListener,
   type SigmaRef,
   type SigmaState,
@@ -20,7 +18,7 @@ import { shouldSetup } from "preact-sigma";
 
 void shouldSetup;
 
-test("sigma infers public state from the two-step declaration", () => {
+test("sigma classes expose typed public state, computeds, queries, and actions", () => {
   type Todo = {
     id: string;
     title: string;
@@ -32,74 +30,63 @@ test("sigma infers public state from the two-step declaration", () => {
     reset: void;
   };
 
-  type TodoListComputeds = {
-    completedCount(): number;
-  };
-
-  type TodoListQueries = {
-    canAdd(): boolean;
-  };
-
-  type TodoListActions = {
-    clear(): void;
-    setDraft(draft: string): void;
-  };
-
-  const todoListComputeds: TodoListComputeds = {
-    completedCount() {
-      return 0;
-    },
-  };
-
-  const todoListQueries: TodoListQueries = {
-    canAdd() {
-      return true;
-    },
-  };
-
-  const todoListActions: TodoListActions = {
-    setDraft(draft: string) {
-      void draft;
-    },
-    clear() {},
-  };
-
-  const TodoList = new SigmaType<
+  class TodoList extends SigmaTarget<
+    TodoEvents,
     {
       draft: string;
       todos: Todo[];
-    },
-    TodoEvents
-  >()
-    .defaultState({
-      draft: "",
-      todos: [],
-    })
-    .computed(todoListComputeds)
-    .queries(todoListQueries)
-    .setup(function (prefix: string) {
-      void prefix;
-      return [];
-    })
-    .actions(todoListActions);
+    }
+  > {
+    declare draft: string;
+    declare todos: Todo[];
+
+    constructor() {
+      super({
+        draft: "",
+        todos: [],
+      });
+    }
+
+    get completedCount() {
+      return this.todos.filter((todo) => todo.completed).length;
+    }
+
+    canAdd() {
+      return this.draft.length > 0;
+    }
+
+    setDraft(draft: string) {
+      this.draft = draft;
+    }
+
+    clear() {
+      this.todos = [];
+      this.commit(function () {
+        this.emit("reset");
+      });
+    }
+  }
 
   const todoList = new TodoList();
+  assertType<void>(
+    query(TodoList.prototype.canAdd, {
+      name: "canAdd",
+      addInitializer() {},
+    } as unknown as ClassMethodDecoratorContext<TodoList, TodoList["canAdd"]>),
+  );
 
   assertType<string>(todoList.draft);
-  assertType<readonly Todo[]>(todoList.todos);
+  assertType<Todo[]>(todoList.todos);
   assertType<number>(todoList.completedCount);
   assertType<boolean>(todoList.canAdd());
   assertType<void>(todoList.setDraft("next"));
   assertType<string>(sigma.getSignal(todoList, "draft").value);
-  assertType<number>(sigma.getSignal(todoList, "completedCount").value);
   assertType<string>(sigma.getState(todoList).draft);
   assertType<readonly Todo[]>(sigma.getState(todoList).todos);
   assertType<() => void>(
-    sigma.subscribe(todoList, function (change) {
-      assertType<string>(change.oldState.draft);
-      assertType<readonly Todo[]>(change.newState.todos);
-      // @ts-expect-error patches are only available when requested
-      void change.patches;
+    sigma.subscribe(todoList, function (nextState, baseState) {
+      assertType<string>(nextState.draft);
+      assertType<readonly Todo[]>(baseState.todos);
     }),
   );
   assertType<() => void>(
@@ -112,17 +99,13 @@ test("sigma infers public state from the two-step declaration", () => {
     draft: "ready",
     todos: [],
   });
-  // @ts-expect-error replaceState requires the full state shape
-  sigma.replaceState(todoList, {
-    draft: "missing todos",
-  });
-  assertType<() => void>(todoList.setup("id"));
   assertType<() => void>(listen(todoList, "reset", () => {}));
   assertType<() => void>(
     listen(todoList, "added", (todo) => {
       expectTypeOf(todo).toEqualTypeOf<Todo>();
     }),
   );
+
   assertType<
     SigmaState<{
       state: {
@@ -130,27 +113,8 @@ test("sigma infers public state from the two-step declaration", () => {
         todos: Todo[];
       };
       events: TodoEvents;
-      computeds: TodoListComputeds;
-      queries: TodoListQueries;
-      actions: TodoListActions;
-      setupArgs: [prefix: string];
     }>
   >(todoList);
-
-  const explicitAction = action((count: number) => count + 1);
-  expectTypeOf(explicitAction).toEqualTypeOf<(count: number) => number>();
-
-  const hasText = query((value: string) => value.length > 0);
-  expectTypeOf(hasText).toEqualTypeOf<(value: string) => boolean>();
-
-  class MutableCache {
-    count = 1;
-  }
-
-  class DraftableCache {
-    [immerable] = true as const;
-    count = 1;
-  }
 
   const createRefCache = (): SigmaRef<{
     count: number;
@@ -166,96 +130,48 @@ test("sigma infers public state from the two-step declaration", () => {
 
   type RefCache = ReturnType<typeof createRefCache>;
 
-  assertType<void>(setAutoFreeze(false));
-  assertType<MutableCache>(new MutableCache());
-  assertType<DraftableCache>(new DraftableCache());
-
-  const Search = new SigmaType<{ count: number }>().defaultState({
-    count: 0,
-  });
-
-  assertType<number>(new Search().count);
-
-  const Generated = new SigmaType<{
-    id: number;
-    tags: string[];
-  }>().defaultState({
-    id: () => 1,
-    tags: () => ["a"],
-  });
-
-  const generated = new Generated();
-
-  assertType<number>(generated.id);
-  assertType<readonly string[]>(generated.tags);
-
-  const RefStore = new SigmaType<{
+  class RefStore extends Sigma<{
     cache: RefCache;
-  }>().defaultState({
-    cache: createRefCache,
-  });
+  }> {
+    declare cache: RefCache;
+
+    constructor() {
+      super({ cache: createRefCache() });
+    }
+  }
 
   const refStore = new RefStore();
 
   refStore.cache.count += 1;
   refStore.cache.nested.label = "next";
 
-  new SigmaType<{ count: number }>().defaultState({
-    // @ts-expect-error initializer result must match the state property type
-    count: () => "wrong",
-  });
+  assertType<void>(setAutoFreeze(false));
 
-  new SigmaType<{ count: number }>()
-    .setup(function () {
-      return [
-        {
-          dispose() {},
-        },
-      ];
-    })
-    .setup(function () {
-      return [
-        {
-          [Symbol.dispose]() {},
-        },
-      ];
-    });
+  const observedCount = new (class ObservedCount extends Sigma<{ count: number }> {
+    declare count: number;
 
-  new SigmaType<{ count: number }>()
-    // @ts-expect-error setup handlers must return arrays of cleanup resources
-    .setup(function () {
-      return () => {};
-    });
-
-  const observedCount = new (new SigmaType<{ count: number }>().defaultState({
-    count: 0,
-  }))();
+    constructor() {
+      super({ count: 0 });
+    }
+  })();
 
   sigma.subscribe(
     observedCount,
-    function (change) {
-      assertType<readonly Patch[]>(change.patches);
-      assertType<readonly Patch[]>(change.inversePatches);
+    function (_nextState, _baseState, patches, inversePatches) {
+      assertType<readonly Patch[]>(patches);
+      assertType<readonly Patch[]>(inversePatches);
     },
     { patches: true },
   );
 });
 
 test("SigmaTarget infers typed events for listen and useListener", () => {
-  const hub = new SigmaTarget<{
+  const hub = new (class Hub extends SigmaTarget<{
     opened: {
       id: string;
     };
     closed: void;
-  }>();
-
-  assertType<() => void>(
-    hub.on("opened", (payload) => {
-      expectTypeOf(payload).toEqualTypeOf<{
-        id: string;
-      }>();
-    }),
-  );
+  }> {})();
 
   assertType<void>(
     hub.emit("opened", {
@@ -263,8 +179,6 @@ test("SigmaTarget infers typed events for listen and useListener", () => {
     }),
   );
   assertType<void>(hub.emit("closed"));
-
-  assertType<() => void>(hub.on("closed", () => {}));
 
   assertType<() => void>(
     listen(hub, "opened", (payload) => {
@@ -293,53 +207,28 @@ test("SigmaTarget infers typed events for listen and useListener", () => {
   hub.emit("closed", {});
 });
 
-test("inline builder methods infer this for state reads", () => {
-  new SigmaType<{ count: number }>()
-    .defaultState({
-      count: 0,
-    })
-    .computed({
-      doubled() {
-        assertType<number>(this.count);
-        return this.count * 2;
-      },
-    })
-    .queries({
-      hasCount() {
-        assertType<number>(this.count);
-        return this.count > 0;
-      },
-    })
-    .actions({
-      increment() {
-        assertType<number>(this.count);
-        assertType<void>(this.commit());
-        this.count += 1;
-      },
-    });
-});
+test("setup act is typed on setup contexts", () => {
+  class Store extends SigmaTarget<{ changed: { count: number } }, { count: number }> {
+    declare count: number;
 
-test("setup act is typed only on setup contexts", () => {
-  const Store = new SigmaType<{ count: number }, { changed: { count: number } }>()
-    .defaultState({
-      count: 0,
-    })
-    .setup(function () {
-      const nextCount = this.act(function () {
+    constructor() {
+      super({ count: 0 });
+    }
+
+    onSetup() {
+      this.act(function () {
         assertType<number>(this.count);
         assertType<void>(this.commit());
         this.count += 1;
         this.commit();
         this.emit("changed", { count: this.count });
-        return this.count;
       });
 
-      assertType<number>(nextCount);
       return [];
-    });
+    }
+  }
 
   const store = new Store();
 
-  // @ts-expect-error act is only available on setup contexts
-  store.act(function () {});
+  assertType<() => void>(store.setup());
 });

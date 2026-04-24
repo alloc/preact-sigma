@@ -1,6 +1,6 @@
 import type { Immutable } from "./immer.js";
 import { isPlainObject } from "./internal/utils.js";
-import { sigma, type SigmaDefinition, type SigmaState } from "./sigma.js";
+import { sigma, type Sigma } from "./sigma.js";
 
 type MaybePromise<T> = T | Promise<T>;
 
@@ -8,13 +8,23 @@ type MutableObject<T extends object> = {
   -readonly [K in keyof T]: T[K];
 };
 
-type Snapshot<T extends SigmaDefinition> = Immutable<T["state"]>;
-
-type CodecContext<TState extends object> = {
+/** Decode-time context passed to persistence codecs. */
+export interface PersistDecodeContext<TState extends object> {
+  /** Storage key used to read the record being decoded. */
   key: string;
+  /** Version number stored with the record being decoded. */
   storedVersion: number;
-  baseState: Readonly<TState>;
-};
+  /** Current committed snapshot before the decoded value is applied. */
+  baseState: Immutable<TState>;
+}
+
+/** Context passed to background write error handlers. */
+export interface PersistErrorContext<TState extends object> {
+  /** Sigma instance whose state was being persisted. */
+  instance: Sigma<TState>;
+  /** Storage key used for the failed write. */
+  key: string;
+}
 
 /** A stored persistence record with version and save-time metadata. */
 export interface PersistRecord<TStored = unknown> {
@@ -24,57 +34,78 @@ export interface PersistRecord<TStored = unknown> {
 }
 
 /** Storage adapter used by persistence helpers. */
-export interface PersistStore<TRecord> {
-  read(key: string): MaybePromise<TRecord | undefined>;
-  write(key: string, record: TRecord): MaybePromise<void>;
+export interface PersistStore<TStored = unknown> {
+  read(key: string): MaybePromise<PersistRecord<TStored> | undefined>;
+  write(key: string, record: PersistRecord<TStored>): MaybePromise<void>;
   remove(key: string): MaybePromise<void>;
 }
 
 /** Synchronous storage adapter used by sync restore helpers. */
-export interface SyncPersistStore<TRecord> extends PersistStore<TRecord> {
-  read(key: string): TRecord | undefined;
-  write(key: string, record: TRecord): void;
+export interface SyncPersistStore<TStored = unknown> extends PersistStore<TStored> {
+  read(key: string): PersistRecord<TStored> | undefined;
+  write(key: string, record: PersistRecord<TStored>): void;
   remove(key: string): void;
 }
 
-/** Codec that maps between in-memory sigma state and stored payloads. */
-export interface PersistCodec<TState extends object, TStored = TState> {
+/** Codec that maps between committed sigma snapshots and stored payloads. */
+export interface PersistCodec<TState extends object, TStored = Immutable<TState>> {
   version: number;
-  encode(state: Readonly<TState>): TStored;
-  decode(stored: unknown, context: CodecContext<TState>): TState;
+  encode(state: Immutable<TState>): TStored;
+  decode(stored: unknown, context: PersistDecodeContext<TState>): TState;
 }
 
 /** Scheduling policy for persistence writes. */
 export type PersistSchedule = "immediate" | "microtask" | { debounceMs: number };
 
-/** Options shared by restore and persistence helpers. */
-export interface PersistOptions<T extends SigmaDefinition, TStored = Snapshot<T>> {
+interface PersistLifecycleOptions<TState extends object> {
   /** Storage key used for reads, writes, and removals. */
   key: string;
-  /** Store adapter that owns persistence I/O. */
-  store: PersistStore<PersistRecord<TStored>>;
-  /** Codec that maps committed snapshots to stored payloads. Defaults to an identity codec with version 1. */
-  codec?: PersistCodec<Snapshot<T>, TStored>;
   /** Scheduling policy for future writes. Defaults to `"microtask"`. */
   schedule?: PersistSchedule;
   /** Writes the current committed snapshot once after persistence becomes active. */
   writeInitial?: boolean;
   /** Receives background write failures without stopping persistence automatically. */
-  onWriteError?: (
-    error: unknown,
-    context: {
-      instance: SigmaState<T>;
-      key: string;
-    },
-  ) => void;
+  onWriteError?: (error: unknown, context: PersistErrorContext<TState>) => void;
+}
+
+/** Options shared by restore and persistence helpers. */
+export interface PersistOptions<
+  TState extends object,
+  TStored = Immutable<TState>,
+> extends PersistLifecycleOptions<TState> {
+  /** Store adapter that owns persistence I/O for stored records. */
+  store: PersistStore<TStored>;
+  /** Codec that maps committed snapshots to stored payloads. Defaults to an identity codec with version 1. */
+  codec?: PersistCodec<TState, TStored>;
+  pick?: never;
+}
+
+/** Options that persist selected top-level state keys without a custom codec. */
+export interface PickPersistOptions<
+  TState extends object,
+  TKey extends keyof TState = keyof TState,
+> extends PersistLifecycleOptions<TState> {
+  /** Store adapter that owns persistence I/O for the selected top-level keys. */
+  store: PersistStore<Pick<TState, TKey>>;
+  /** Top-level state keys to persist and restore from the current base snapshot. */
+  pick: readonly TKey[];
+  codec?: never;
 }
 
 /** Options that require a synchronous store. */
 export interface SyncPersistOptions<
-  T extends SigmaDefinition,
-  TStored = Snapshot<T>,
-> extends PersistOptions<T, TStored> {
-  store: SyncPersistStore<PersistRecord<TStored>>;
+  TState extends object,
+  TStored = Immutable<TState>,
+> extends PersistOptions<TState, TStored> {
+  store: SyncPersistStore<TStored>;
+}
+
+/** Pick-based options that require a synchronous store. */
+export interface SyncPickPersistOptions<
+  TState extends object,
+  TKey extends keyof TState = keyof TState,
+> extends PickPersistOptions<TState, TKey> {
+  store: SyncPersistStore<Pick<TState, TKey>>;
 }
 
 /** Result returned by restore helpers. */
@@ -96,19 +127,19 @@ export interface PersistenceHandle {
   stop(): Promise<void>;
 }
 
-/** Async restore-plus-persist binding result. */
-export interface BoundPersistence extends PersistenceHandle {
+/** Async restore-plus-persist handle. */
+export interface HydrationHandle extends PersistenceHandle {
   /** Resolves when restore finishes and reports whether a record was applied. */
   readonly restored: Promise<RestoreResult>;
 }
 
-/** Sync restore-plus-persist binding result. */
-export interface SyncBoundPersistence extends PersistenceHandle {
+/** Sync restore-plus-persist handle. */
+export interface SyncHydrationHandle extends PersistenceHandle {
   /** Reports the synchronous restore result that ran before persistence started. */
   readonly restored: RestoreResult;
 }
 
-function createIdentityCodec<TState extends object>(): PersistCodec<TState, TState> {
+function createIdentityCodec<TState extends object>(): PersistCodec<TState> {
   return {
     version: 1,
     encode(state) {
@@ -120,63 +151,7 @@ function createIdentityCodec<TState extends object>(): PersistCodec<TState, TSta
   };
 }
 
-function getCodec<T extends SigmaDefinition, TStored>(
-  options: PersistOptions<T, TStored>,
-): PersistCodec<Snapshot<T>, TStored> {
-  return (options.codec ?? createIdentityCodec<Snapshot<T>>()) as PersistCodec<
-    Snapshot<T>,
-    TStored
-  >;
-}
-
-function applyRecord<T extends SigmaDefinition, TStored>(
-  instance: SigmaState<T>,
-  key: string,
-  record: PersistRecord<TStored> | undefined,
-  codec: PersistCodec<Snapshot<T>, TStored>,
-): RestoreResult {
-  if (!record) {
-    return { status: "missing" };
-  }
-
-  const baseState = sigma.getState(instance);
-  const nextState = codec.decode(record.value, {
-    baseState,
-    key,
-    storedVersion: record.version,
-  });
-
-  sigma.replaceState(instance, nextState);
-
-  return {
-    status: "restored",
-    savedAt: record.savedAt,
-    storedVersion: record.version,
-  };
-}
-
-/** Restores committed state from a persisted record through an async store. */
-export async function restoreState<T extends SigmaDefinition, TStored = Snapshot<T>>(
-  instance: SigmaState<T>,
-  options: PersistOptions<T, TStored>,
-): Promise<RestoreResult> {
-  const codec = getCodec(options);
-  const record = await options.store.read(options.key);
-  return applyRecord(instance, options.key, record, codec);
-}
-
-/** Restores committed state from a persisted record through a sync store. */
-export function restoreStateSync<T extends SigmaDefinition, TStored = Snapshot<T>>(
-  instance: SigmaState<T>,
-  options: SyncPersistOptions<T, TStored>,
-): RestoreResult {
-  const codec = getCodec(options);
-  const record = options.store.read(options.key);
-  return applyRecord(instance, options.key, record, codec);
-}
-
-/** Creates a codec that persists selected top-level state keys and reconstructs a full snapshot on decode. */
-export function pickStateCodec<TState extends object, TKey extends keyof TState>(
+function createPickCodec<TState extends object, TKey extends keyof TState>(
   keys: readonly TKey[],
 ): PersistCodec<TState, Pick<TState, TKey>> {
   return {
@@ -184,13 +159,13 @@ export function pickStateCodec<TState extends object, TKey extends keyof TState>
     encode(state) {
       const stored = {} as Pick<TState, TKey>;
       for (const key of keys) {
-        stored[key] = state[key];
+        stored[key] = (state as TState)[key];
       }
       return stored;
     },
     decode(stored, context) {
       if (!isPlainObject(stored)) {
-        throw new Error("[preact-sigma/persist] pickStateCodec() requires a plain object payload");
+        throw new Error("[preact-sigma/persist] pick requires a plain object payload");
       }
 
       const partialStored = stored as Partial<Record<TKey, TState[TKey]>>;
@@ -207,19 +182,110 @@ export function pickStateCodec<TState extends object, TKey extends keyof TState>
   };
 }
 
-/** Persists future committed state changes for one sigma-state instance. */
-export function persistState<T extends SigmaDefinition, TStored = Snapshot<T>>(
-  instance: SigmaState<T>,
-  options: PersistOptions<T, TStored>,
+type AnyPersistOptions<TState extends object, TStored = Immutable<TState>> =
+  | PersistOptions<TState, TStored>
+  | PickPersistOptions<TState, keyof TState>;
+
+type AnySyncPersistOptions<TState extends object, TStored = Immutable<TState>> =
+  | SyncPersistOptions<TState, TStored>
+  | SyncPickPersistOptions<TState, keyof TState>;
+
+function getCodec<TState extends object, TStored>(
+  options: AnyPersistOptions<TState, TStored>,
+): PersistCodec<TState, TStored> {
+  if (options.codec) {
+    return options.codec;
+  }
+  if (options.pick) {
+    return createPickCodec(options.pick) as PersistCodec<TState, TStored>;
+  }
+  return createIdentityCodec<TState>() as PersistCodec<TState, TStored>;
+}
+
+function applyRecord<TState extends object, TStored>(
+  instance: Sigma<TState>,
+  key: string,
+  record: PersistRecord<TStored> | undefined,
+  codec: PersistCodec<TState, TStored>,
+): RestoreResult {
+  if (!record) {
+    return { status: "missing" };
+  }
+
+  const baseState = sigma.captureState(instance);
+  const nextState = codec.decode(record.value, {
+    baseState,
+    key,
+    storedVersion: record.version,
+  });
+
+  sigma.replaceState(instance, nextState);
+
+  return {
+    status: "restored",
+    savedAt: record.savedAt,
+    storedVersion: record.version,
+  };
+}
+
+/** Restores committed state from a persisted record through an async store. */
+export async function restore<TState extends object, TKey extends keyof TState>(
+  instance: Sigma<TState>,
+  options: PickPersistOptions<TState, TKey>,
+): Promise<RestoreResult>;
+export async function restore<TState extends object, TStored = Immutable<TState>>(
+  instance: Sigma<TState>,
+  options: PersistOptions<TState, TStored>,
+): Promise<RestoreResult>;
+export async function restore<TState extends object, TStored = Immutable<TState>>(
+  instance: Sigma<TState>,
+  options: AnyPersistOptions<TState, TStored>,
+): Promise<RestoreResult> {
+  const codec = getCodec(options);
+  const record = (await options.store.read(options.key)) as PersistRecord<TStored> | undefined;
+  return applyRecord(instance, options.key, record, codec);
+}
+
+/** Restores committed state from a persisted record through a sync store. */
+export function restoreSync<TState extends object, TKey extends keyof TState>(
+  instance: Sigma<TState>,
+  options: SyncPickPersistOptions<TState, TKey>,
+): RestoreResult;
+export function restoreSync<TState extends object, TStored = Immutable<TState>>(
+  instance: Sigma<TState>,
+  options: SyncPersistOptions<TState, TStored>,
+): RestoreResult;
+export function restoreSync<TState extends object, TStored = Immutable<TState>>(
+  instance: Sigma<TState>,
+  options: AnySyncPersistOptions<TState, TStored>,
+): RestoreResult {
+  const codec = getCodec(options);
+  const record = options.store.read(options.key) as PersistRecord<TStored> | undefined;
+  return applyRecord(instance, options.key, record, codec);
+}
+
+/** Persists future committed state changes for one sigma instance. */
+export function persist<TState extends object, TKey extends keyof TState>(
+  instance: Sigma<TState>,
+  options: PickPersistOptions<TState, TKey>,
+): PersistenceHandle;
+export function persist<TState extends object, TStored = Immutable<TState>>(
+  instance: Sigma<TState>,
+  options: PersistOptions<TState, TStored>,
+): PersistenceHandle;
+export function persist<TState extends object, TStored = Immutable<TState>>(
+  instance: Sigma<TState>,
+  options: AnyPersistOptions<TState, TStored>,
 ): PersistenceHandle {
   const codec = getCodec(options);
   const schedule = options.schedule ?? "microtask";
   const key = options.key;
+  const store = options.store as PersistStore<TStored>;
 
   let stopped = false;
   let suspended = false;
   let hasPendingState = false;
-  let pendingState: Snapshot<T> | undefined;
+  let pendingState: Immutable<TState> | undefined;
   let microtaskScheduled = false;
   let debounceTimer: ReturnType<typeof setTimeout> | undefined;
   let runningWrite: Promise<void> | undefined;
@@ -233,7 +299,7 @@ export function persistState<T extends SigmaDefinition, TStored = Snapshot<T>>(
     }
   };
 
-  const createRecord = (state: Snapshot<T>): PersistRecord<TStored> => ({
+  const createRecord = (state: Immutable<TState>): PersistRecord<TStored> => ({
     version: codec.version,
     savedAt: Date.now(),
     value: codec.encode(state),
@@ -291,7 +357,7 @@ export function persistState<T extends SigmaDefinition, TStored = Snapshot<T>>(
   };
 
   const queueStateWrite = () => {
-    pendingState = sigma.getState(instance);
+    pendingState = sigma.captureState(instance);
     hasPendingState = true;
     scheduleWrite();
   };
@@ -306,7 +372,7 @@ export function persistState<T extends SigmaDefinition, TStored = Snapshot<T>>(
       while (hasPendingState && !stopped && !suspended) {
         const state = pendingState!;
         hasPendingState = false;
-        await options.store.write(key, createRecord(state));
+        await store.write(key, createRecord(state));
       }
     })();
 
@@ -344,7 +410,7 @@ export function persistState<T extends SigmaDefinition, TStored = Snapshot<T>>(
 
       try {
         await runningWrite;
-        await options.store.remove(key);
+        await store.remove(key);
       } finally {
         suspended = false;
         if (hasPendingState && !stopped) {
@@ -371,17 +437,25 @@ export function persistState<T extends SigmaDefinition, TStored = Snapshot<T>>(
 }
 
 /** Restores state, then begins persisting future committed changes. */
-export function bindPersistence<T extends SigmaDefinition, TStored = Snapshot<T>>(
-  instance: SigmaState<T>,
-  options: PersistOptions<T, TStored>,
-): BoundPersistence {
+export function hydrate<TState extends object, TKey extends keyof TState>(
+  instance: Sigma<TState>,
+  options: PickPersistOptions<TState, TKey>,
+): HydrationHandle;
+export function hydrate<TState extends object, TStored = Immutable<TState>>(
+  instance: Sigma<TState>,
+  options: PersistOptions<TState, TStored>,
+): HydrationHandle;
+export function hydrate<TState extends object, TStored = Immutable<TState>>(
+  instance: Sigma<TState>,
+  options: AnyPersistOptions<TState, TStored>,
+): HydrationHandle {
   let stopped = false;
   let handle: PersistenceHandle | undefined;
 
   const restored = (async () => {
-    const result = await restoreState(instance, options);
+    const result = await restore(instance, options as PersistOptions<TState, TStored>);
     if (!stopped) {
-      handle = persistState(instance, options);
+      handle = persist(instance, options as PersistOptions<TState, TStored>);
     }
     return result;
   })();
@@ -429,12 +503,20 @@ export function bindPersistence<T extends SigmaDefinition, TStored = Snapshot<T>
 }
 
 /** Restores state synchronously, then begins persisting future committed changes. */
-export function bindPersistenceSync<T extends SigmaDefinition, TStored = Snapshot<T>>(
-  instance: SigmaState<T>,
-  options: SyncPersistOptions<T, TStored>,
-): SyncBoundPersistence {
-  const restored = restoreStateSync(instance, options);
-  const handle = persistState(instance, options);
+export function hydrateSync<TState extends object, TKey extends keyof TState>(
+  instance: Sigma<TState>,
+  options: SyncPickPersistOptions<TState, TKey>,
+): SyncHydrationHandle;
+export function hydrateSync<TState extends object, TStored = Immutable<TState>>(
+  instance: Sigma<TState>,
+  options: SyncPersistOptions<TState, TStored>,
+): SyncHydrationHandle;
+export function hydrateSync<TState extends object, TStored = Immutable<TState>>(
+  instance: Sigma<TState>,
+  options: AnySyncPersistOptions<TState, TStored>,
+): SyncHydrationHandle {
+  const restored = restoreSync(instance, options as SyncPersistOptions<TState, TStored>);
+  const handle = persist(instance, options as PersistOptions<TState, TStored>);
   return {
     restored,
     clear() {

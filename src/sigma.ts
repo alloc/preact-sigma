@@ -8,7 +8,13 @@ import {
 } from "@preact/signals";
 import * as immer from "./immer.js";
 import { type EventParameters, SigmaListenerMap } from "./internal/listener.js";
-import { instanceSymbol, listenersSymbol, refSymbol, typeSymbol } from "./internal/symbols.js";
+import {
+  instanceSymbol,
+  listenersSymbol,
+  refSymbol,
+  snapshotSymbol,
+  typeSymbol,
+} from "./internal/symbols.js";
 import {
   type AnyFunction,
   type AnyResource,
@@ -19,6 +25,11 @@ import {
 
 let autoFreezeEnabled = true;
 
+/**
+ * Configures Immer auto-freezing for values published through sigma state.
+ *
+ * Auto-freezing is enabled by default, so draftable public values are deeply frozen after publish.
+ */
 export function setAutoFreeze(autoFreeze: boolean) {
   immer.setAutoFreeze(autoFreeze);
   autoFreezeEnabled = autoFreeze;
@@ -31,15 +42,18 @@ const initializedTypes = new WeakSet<Function>();
 const queries = new WeakSet<Function>();
 const emptySentinel: any = {};
 
+/** Marks object values that should keep their reference-like type in `Draft` and `Immutable` mappings. */
 export type SigmaRef<T extends object = {}> = T & {
   [refSymbol]?: true;
 };
 
+/** Definition shape used by helper types that need both state and event maps. */
 export type SigmaDefinition = {
   state: object;
   events?: object;
 };
 
+/** Instance type for a sigma definition with state typing preserved for public helpers. */
 export type SigmaState<T extends SigmaDefinition> = Sigma<T["state"]> & {
   [typeSymbol]: T;
 };
@@ -71,12 +85,21 @@ function getStateSignal(instance: Sigma<any>, key: string) {
   return (instance as any)[key + signalSuffix] as Signal<any> | undefined;
 }
 
-function captureState<TState extends object>(instance: Sigma<TState>): immer.Immutable<TState> {
-  return Object.freeze({ ...instance }) as any;
+function createSnapshot(instance: Sigma<any>) {
+  if (instance[snapshotSymbol]) {
+    return instance[snapshotSymbol];
+  }
+  const state: Record<string, unknown> = {};
+  for (const key in instance) {
+    if (isStateKey(instance, key)) {
+      state[key] = (instance as any)[key];
+    }
+  }
+  return state;
 }
 
 function createDraft<TState extends object>(instance: Sigma<TState>): immer.Draft<TState> {
-  return immer.createDraft({ ...instance }) as any;
+  return immer.createDraft(createSnapshot(instance)) as any;
 }
 
 function hasPatchListeners(instance: Sigma<any>) {
@@ -99,13 +122,27 @@ function publishState(
   patches?: immer.Patch[],
   inversePatches?: immer.Patch[],
 ) {
+  instance[snapshotSymbol] = nextState;
   batch(() => {
+    const missingKeys = new Set(Object.keys(baseState));
     for (const key in nextState) {
       const nextValue = nextState[key];
       if (autoFreezeEnabled) {
         immer.freeze(nextValue, true);
       }
-      getStateSignal(instance, key)!.value = nextValue;
+      const signal = getStateSignal(instance, key);
+      if (signal) {
+        signal.value = nextValue;
+      } else {
+        defineSignalProperty(instance, key, nextValue);
+      }
+      missingKeys.delete(key);
+    }
+    for (const key of missingKeys) {
+      const signal = getStateSignal(instance, key);
+      if (signal) {
+        signal.value = undefined;
+      }
     }
   });
 
@@ -189,18 +226,26 @@ function ensureDraftCommitted(instance: Sigma<any>) {
 function initializePrototype(prototype: object) {
   const descriptors = Object.getOwnPropertyDescriptors(prototype);
   for (const key in descriptors) {
+    if (key === "constructor" || key === "onSetup") {
+      continue;
+    }
+
     const { get, value } = descriptors[key];
 
     // Computeds
     if (get) {
       descriptors[key].get = function () {
-        const signal = ((this as any)[key + signalSuffix] ??= computed(get.bind(this)));
+        if (activeDraft) {
+          return get.call(this);
+        }
+        const instance = getActionInstance(this);
+        const signal = ((instance as any)[key + signalSuffix] ??= computed(get.bind(instance)));
         return signal.value;
       };
     }
 
     // Actions
-    else if (typeof value === "function" && key !== "constructor" && !queries.has(value)) {
+    else if (typeof value === "function" && !queries.has(value)) {
       const actionFn = action(value);
 
       descriptors[key].value = function (this: object, ...args: any[]) {
@@ -291,8 +336,15 @@ function defineSignalProperty(instance: Sigma<any>, key: string, value: any) {
   }
 }
 
+/**
+ * Base class for signal-backed state models.
+ *
+ * `TState` is the source of typing for top-level state keys, subscriptions, signals, and replacement snapshots.
+ * Merge a same-named interface with the class when direct property reads should be typed on the instance.
+ */
 export abstract class Sigma<TState extends object> {
   declare [typeSymbol]: { state: TState; events: unknown };
+  declare [snapshotSymbol]: Record<string, unknown> | undefined;
 
   protected get [instanceSymbol]() {
     return this;
@@ -315,8 +367,10 @@ export abstract class Sigma<TState extends object> {
     }
   }
 
+  /** Optional setup hook that owns side effects and returns cleanup resources. */
   onSetup?(...args: any[]): readonly AnyResource[];
 
+  /** Runs `onSetup(...)` and returns a cleanup that disposes returned resources in reverse order. */
   setup(...args: Parameters<Extract<this["onSetup"], AnyFunction>>) {
     const setupContext = new Proxy(this, {
       get(target, key, receiver) {
@@ -324,7 +378,7 @@ export abstract class Sigma<TState extends object> {
           return target;
         }
         if (key === "act") {
-          return act;
+          return act.bind(target);
         }
         return Reflect.get(target, key, receiver);
       },
@@ -337,26 +391,52 @@ export abstract class Sigma<TState extends object> {
     };
   }
 
+  /** Returns a readonly consumer view that hides lifecycle and event-emitter internals. */
   protect(): Protected<this> {
     return this as any;
   }
 
+  /**
+   * Publishes the current action draft.
+   *
+   * Use this before unpublished changes cross an async, event, or external-action boundary.
+   * A callback runs after publish in an action context.
+   */
   commit<T = void>(callback?: (this: typeof this) => T) {
     const instance = getActionInstance(this);
     if (instance === this) {
       throw new Error("Cannot commit() from outside an action.");
     }
     ensureDraftCommitted(instance);
-    return callback?.call(instance as this);
+    if (callback) {
+      const context = new Proxy(instance, {
+        get(target, key, receiver) {
+          if (key === instanceSymbol) {
+            return instance;
+          }
+          return Reflect.get(target, key, receiver);
+        },
+      });
+      return callback.call(context as this);
+    }
   }
 
+  /** Runs a synchronous setup-owned callback with action semantics from an `onSetup(...)` context. */
   // oxlint-disable-next-line no-unused-vars
   act(fn: (this: typeof this) => void) {
     throw new Error("Cannot act() from outside an onSetup() context.");
   }
 }
 
-export class SigmaTarget<TState extends object = {}, TEvents = {}> extends Sigma<TState> {
+/**
+ * Sigma state model that can emit typed events.
+ *
+ * `TEvents` maps event names to payload types, and `TState` types reactive state.
+ */
+export class SigmaTarget<
+  TEvents extends object = {},
+  TState extends object = {},
+> extends Sigma<TState> {
   declare [typeSymbol]: { state: TState; events: TEvents };
   protected [listenersSymbol] = new SigmaListenerMap();
 
@@ -364,6 +444,7 @@ export class SigmaTarget<TState extends object = {}, TEvents = {}> extends Sigma
     super(state ?? emptySentinel);
   }
 
+  /** Emits a typed event from an action after unpublished draft changes are committed. */
   emit<TEvent extends string & keyof TEvents>(
     name: TEvent,
     ...[detail]: EventParameters<TEvents[TEvent]>
@@ -379,7 +460,9 @@ export class SigmaTarget<TState extends object = {}, TEvents = {}> extends Sigma
   }
 }
 
+/** Helpers for observing, accessing, capturing, and replacing committed sigma state. */
 export const sigma = /* @__PURE__ */ Object.freeze({
+  /** Subscribes to committed state publishes or to one signal-backed top-level state key. */
   subscribe: ((
     instance: Sigma<any>,
     keyOrListener: string | AnyFunction,
@@ -416,8 +499,8 @@ export const sigma = /* @__PURE__ */ Object.freeze({
     <TState extends object>(
       instance: Sigma<TState>,
       listener: (
-        nextState: Protected<TState>,
-        baseState: Protected<TState>,
+        nextState: immer.Immutable<TState>,
+        baseState: immer.Immutable<TState>,
         patches: immer.Patch[],
         inversePatches: immer.Patch[],
       ) => void,
@@ -427,8 +510,8 @@ export const sigma = /* @__PURE__ */ Object.freeze({
     <TState extends object>(
       instance: Sigma<TState>,
       listener: (
-        nextState: Protected<TState>,
-        baseState: Protected<TState>,
+        nextState: immer.Immutable<TState>,
+        baseState: immer.Immutable<TState>,
         patches: immer.Patch[] | undefined,
         inversePatches: immer.Patch[] | undefined,
       ) => void,
@@ -437,31 +520,30 @@ export const sigma = /* @__PURE__ */ Object.freeze({
 
     <TState extends object>(
       instance: Sigma<TState>,
-      listener: (nextState: Protected<TState>, baseState: Protected<TState>) => void,
+      listener: (nextState: immer.Immutable<TState>, baseState: immer.Immutable<TState>) => void,
     ): Cleanup;
 
-    <TState extends object>(
+    <TState extends object, TKey extends Extract<keyof TState, string>>(
       instance: Sigma<TState>,
-      key: Extract<keyof TState, string>,
-      listener: (value: Protected<TState[typeof key]>) => void,
+      key: TKey,
+      listener: (value: immer.Immutable<TState[TKey]>) => void,
     ): Cleanup;
   },
 
-  getSignal<TState extends object>(
+  /** Returns the readonly signal backing one top-level state key. */
+  getSignal<TState extends object, TKey extends Extract<keyof TState, string>>(
     instance: Sigma<TState>,
-    key: Extract<keyof TState, string>,
-  ): ReadonlySignal<Protected<TState[typeof key]>> {
+    key: TKey,
+  ): ReadonlySignal<immer.Immutable<TState[TKey]>> {
     return getStateSignal(instance, key)!;
   },
 
+  /** Captures the current committed top-level state snapshot. */
   captureState<TState extends object>(instance: Sigma<TState>): immer.Immutable<TState> {
-    return captureState(instance);
+    return Object.freeze(createSnapshot(instance)) as any;
   },
 
-  getState<TState extends object>(instance: Sigma<TState>): immer.Immutable<TState> {
-    return captureState(instance);
-  },
-
+  /** Publishes a plain-object snapshot as the current committed state. */
   replaceState<TState extends object>(target: Sigma<TState>, nextState: TState) {
     if (!isPlainObject(nextState)) {
       throw new Error("[preact-sigma] replaceState() requires a plain object snapshot");
@@ -473,38 +555,15 @@ export const sigma = /* @__PURE__ */ Object.freeze({
     }
 
     const instance = getActionInstance(target);
+    const baseState = createSnapshot(instance);
+    const patches = hasPatchListeners(instance) ? [] : undefined;
+    const inversePatches = patches ? [] : undefined;
 
-    act.call(instance, function () {
-      const prevKeys = Object.keys(this) as (string & keyof TState)[];
-      const nextKeys = Object.keys(nextState) as (string & keyof TState)[];
-
-      // Update existing keys and define new ones
-      for (const key of nextKeys) {
-        const nextValue = nextState[key];
-        if (autoFreezeEnabled) {
-          immer.freeze(nextValue, true);
-        }
-        const signal = getStateSignal(this, key);
-        if (signal) {
-          signal.value = nextValue;
-        } else {
-          defineSignalProperty(this, key, nextValue);
-        }
-      }
-
-      // Reset missing keys to undefined
-      for (const key of prevKeys) {
-        if (!nextKeys.includes(key)) {
-          const signal = getStateSignal(this, key);
-          if (signal) {
-            signal.value = undefined;
-          }
-        }
-      }
-    });
+    publishState(instance, nextState, baseState, patches, inversePatches);
   },
 });
 
+/** Marks a class method as a reactive read with arguments instead of an action. */
 export function query(method: AnyFunction, context: ClassMethodDecoratorContext<any, any>) {
   queries.add(method);
   function queryMethod(this: any, ...args: any[]) {
@@ -518,12 +577,20 @@ export function query(method: AnyFunction, context: ClassMethodDecoratorContext<
 declare const protectedSymbol: unique symbol;
 
 // Keys hidden by the Protected type.
-type ProtectedKey = typeof typeSymbol | "act" | "commit" | "emit" | "onSetup" | "protect";
+type ProtectedKey =
+  | typeof typeSymbol
+  | typeof snapshotSymbol
+  | "act"
+  | "commit"
+  | "emit"
+  | "onSetup"
+  | "protect";
 
 // This makes it less likely for Protected<T> to be erased by the type system.
 type BrandProtected<T> = T & { [protectedSymbol]: true };
 
-export type Protected<T> = BrandProtected<
+/** Readonly public view returned by `protect(...)` and `useSigma(...)`. */
+export type Protected<T extends Sigma<any>> = BrandProtected<
   T extends { [typeSymbol]: infer TState }
     ? {
         [K in Exclude<keyof T, ProtectedKey>]: K extends keyof TState

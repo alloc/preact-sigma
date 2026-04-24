@@ -1,11 +1,10 @@
 import { assertType, expectTypeOf, test } from "vitest";
-import { SigmaType } from "preact-sigma";
+import { Sigma } from "preact-sigma";
 import {
-  bindPersistence,
-  bindPersistenceSync,
-  pickStateCodec,
-  restoreState,
-  restoreStateSync,
+  hydrate,
+  hydrateSync,
+  restore,
+  restoreSync,
   type PersistCodec,
   type PersistOptions,
   type PersistRecord,
@@ -14,18 +13,27 @@ import {
   type SyncPersistStore,
 } from "preact-sigma/persist";
 
-test("persist helpers infer state and store types", () => {
-  const Search = new SigmaType<{
-    draft: string;
-    page: number;
-  }>().defaultState({
-    draft: "",
-    page: 1,
-  });
+type SearchState = {
+  draft: string;
+  page: number;
+};
 
+class Search extends Sigma<SearchState> {
+  declare draft: string;
+  declare page: number;
+
+  constructor() {
+    super({
+      draft: "",
+      page: 1,
+    });
+  }
+}
+
+test("persist helpers infer state and store types", () => {
   const search = new Search();
 
-  const syncStore: SyncPersistStore<PersistRecord<{ draft: string; page: number }>> = {
+  const syncStore: SyncPersistStore<SearchState> = {
     read() {
       return undefined;
     },
@@ -35,7 +43,7 @@ test("persist helpers infer state and store types", () => {
 
   const asyncStore = {
     async read() {
-      return undefined as PersistRecord<{ draft: string; page: number }> | undefined;
+      return undefined as PersistRecord<SearchState> | undefined;
     },
     async write() {},
     async remove() {},
@@ -44,15 +52,27 @@ test("persist helpers infer state and store types", () => {
   const fullOptions = {
     key: "search",
     store: syncStore,
-  } satisfies SyncPersistOptions<typeof search>;
+  } satisfies SyncPersistOptions<SearchState>;
 
-  assertType<RestoreResult>(restoreStateSync(search, fullOptions));
-  assertType<Promise<RestoreResult>>(restoreState(search, { key: "search", store: asyncStore }));
+  assertType<RestoreResult>(restoreSync(search, fullOptions));
+  assertType<Promise<RestoreResult>>(restore(search, { key: "search", store: asyncStore }));
 
-  const partialCodec = pickStateCodec<{ draft: string; page: number }, "draft">(["draft"]);
-  expectTypeOf(partialCodec).toEqualTypeOf<
-    PersistCodec<{ draft: string; page: number }, { draft: string }>
-  >();
+  const partialCodec = {
+    version: 1,
+    encode(state) {
+      return {
+        draft: state.draft,
+      };
+    },
+    decode(stored, context) {
+      return {
+        ...context.baseState,
+        ...(stored as { draft: string }),
+      };
+    },
+  } satisfies PersistCodec<SearchState, { draft: string }>;
+
+  expectTypeOf(partialCodec).toEqualTypeOf<PersistCodec<SearchState, { draft: string }>>();
 
   const partialOptions = {
     codec: partialCodec,
@@ -64,12 +84,34 @@ test("persist helpers infer state and store types", () => {
       write() {},
       remove() {},
     },
-  } satisfies PersistOptions<typeof search, { draft: string }>;
+  } satisfies PersistOptions<SearchState, { draft: string }>;
 
-  assertType<Promise<RestoreResult>>(restoreState(search, partialOptions));
-  assertType<RestoreResult>(bindPersistenceSync(search, fullOptions).restored);
-  assertType<Promise<RestoreResult>>(bindPersistence(search, { key: "search", store: asyncStore }).restored);
+  const pickedStore: SyncPersistStore<Pick<SearchState, "draft">> = {
+    read() {
+      return undefined;
+    },
+    write() {},
+    remove() {},
+  };
 
-  // @ts-expect-error restoreStateSync requires a synchronous store
-  restoreStateSync(search, { key: "search", store: asyncStore });
+  assertType<Promise<RestoreResult>>(restore(search, partialOptions));
+  assertType<RestoreResult>(hydrateSync(search, fullOptions).restored);
+  assertType<Promise<RestoreResult>>(hydrate(search, { key: "search", store: asyncStore }).restored);
+  assertType<RestoreResult>(
+    hydrateSync(search, {
+      key: "search",
+      pick: ["draft"],
+      store: pickedStore,
+    }).restored,
+  );
+
+  // @ts-expect-error restoreSync requires a synchronous store
+  restoreSync(search, { key: "search", store: asyncStore });
+
+  // @ts-expect-error pick keys must exist on the sigma state
+  hydrateSync(search, {
+    key: "search",
+    pick: ["missing"],
+    store: pickedStore,
+  });
 });

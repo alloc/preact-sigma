@@ -1,29 +1,35 @@
-import { sigma, SigmaType } from "preact-sigma";
+import { sigma, Sigma } from "preact-sigma";
 
-const TodoList = new SigmaType<{
+type TodoListState = {
   todos: string[];
-}>("TodoList")
-  .defaultState({
-    todos: [],
-  })
-  .actions({
-    add(title: string) {
-      this.todos.push(title);
-    },
-  });
+};
+
+class TodoList extends Sigma<TodoListState> {
+  constructor() {
+    super({
+      todos: [],
+    });
+  }
+
+  add(title: string) {
+    this.todos.push(title);
+  }
+}
+
+interface TodoList extends TodoListState {}
 
 const todoList = new TodoList();
-const stop = sigma.subscribe(todoList, (change) => {
-  console.log(`${change.oldState.todos.length} -> ${change.newState.todos.length}`);
+const stop = sigma.subscribe(todoList, (nextState, baseState) => {
+  console.log(`${baseState.todos.length} -> ${nextState.todos.length}`);
 });
 
 todoList.add("Write docs");
 
-const saved = sigma.getState(todoList);
+const saved = sigma.captureState(todoList);
 
 todoList.add("Ship release");
 sigma.replaceState(todoList, saved);
 
-console.log(sigma.getState(todoList).todos); // ["Write docs"]
+console.log(sigma.captureState(todoList).todos); // ["Write docs"]
 
 stop();

@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Breaking Changes
+
+- **Class-based models replace the `SigmaType` builder:** Define reusable state with `Sigma<TState>` and `SigmaTarget<TEvents, TState>` subclasses. State comes from `super(...)`, getters are computed reads, `@query` marks argument-based reads, and ordinary prototype methods are actions.
+- **Committed snapshots use `sigma.captureState(...)`:** The committed-state read helper is now `sigma.captureState(instance)`, paired with `sigma.replaceState(instance, nextState)`.
+
+### Added
+
+- **Default-state helper:** `mergeDefaults(...)` shallowly applies defined constructor overrides over a defaults object.
+- **Current persistence helper names:** `preact-sigma/persist` documents `restore(...)`, `restoreSync(...)`, `persist(...)`, `hydrate(...)`, `hydrateSync(...)`, and `pick` options for selected top-level state keys.
+
 ## v5.0.0
 
 ### Breaking Changes
@@ -56,11 +68,13 @@ If you are using the `SigmaType` builder pattern (e.g., `new SigmaType<{ count: 
 If you have manually annotated variables or functions with `SigmaType` or its context types, you must update the generic arguments:
 
 **Before:**
+
 ```ts
 function myHelper(ctx: ActionContext<MyState, MyEvents, MyComputeds, MyQueries, MyActions>) { ... }
 ```
 
 **After:**
+
 ```ts
 import { ActionContext, SigmaDefinition } from "preact-sigma";
 

@@ -1,21 +1,67 @@
-import { afterEach, assert, test, vi } from "vitest";
-import { SigmaType } from "preact-sigma";
+import { mergeDefaults, Sigma } from "preact-sigma";
 import {
-  bindPersistence,
-  bindPersistenceSync,
-  persistState,
-  pickStateCodec,
-  restoreStateSync,
+  hydrate,
+  hydrateSync,
+  persist,
+  restoreSync,
   type PersistRecord,
   type PersistStore,
   type SyncPersistStore,
 } from "preact-sigma/persist";
+import { afterEach, assert, test, vi } from "vitest";
 
-function createSyncStore<TRecord>() {
-  const records = new Map<string, TRecord>();
-  const writes: Array<{ key: string; record: TRecord }> = [];
+type CounterState = {
+  count: number;
+};
 
-  const store: SyncPersistStore<TRecord> = {
+class Counter extends Sigma<CounterState> {
+  declare count: number;
+
+  static defaultState: CounterState = {
+    count: 0,
+  };
+
+  constructor(initialState?: Partial<CounterState>) {
+    super(mergeDefaults(initialState, Counter.defaultState));
+  }
+
+  increment() {
+    this.count += 1;
+  }
+}
+
+type SearchState = {
+  draft: string;
+  page: number;
+};
+
+class Search extends Sigma<SearchState> {
+  declare draft: string;
+  declare page: number;
+
+  static defaultState: SearchState = {
+    draft: "",
+    page: 1,
+  };
+
+  constructor(initialState?: Partial<SearchState>) {
+    super(mergeDefaults(initialState, Search.defaultState));
+  }
+
+  nextPage() {
+    this.page += 1;
+  }
+
+  setDraft(draft: string) {
+    this.draft = draft;
+  }
+}
+
+function createSyncStore<TStored>(initial?: Iterable<readonly [string, PersistRecord<TStored>]>) {
+  const records = new Map(initial);
+  const writes: Array<{ key: string; record: PersistRecord<TStored> }> = [];
+
+  const store: SyncPersistStore<TStored> = {
     read(key) {
       return records.get(key);
     },
@@ -35,11 +81,11 @@ function createSyncStore<TRecord>() {
   };
 }
 
-function createAsyncStore<TRecord>(initial?: Iterable<readonly [string, TRecord]>) {
+function createAsyncStore<TStored>(initial?: Iterable<readonly [string, PersistRecord<TStored>]>) {
   const records = new Map(initial);
-  const writes: Array<{ key: string; record: TRecord }> = [];
+  const writes: Array<{ key: string; record: PersistRecord<TStored> }> = [];
 
-  const store: PersistStore<TRecord> = {
+  const store: PersistStore<TStored> = {
     async read(key) {
       return records.get(key);
     },
@@ -63,45 +109,18 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-test("restoreStateSync returns missing when no record exists", () => {
-  const Counter = new SigmaType<{ count: number }>()
-    .defaultState({
-      count: 0,
-    })
-    .actions({
-      increment() {
-        this.count += 1;
-      },
-    });
-
+test("restoreSync returns missing when no record exists", () => {
   const counter = new Counter();
-  const { store } = createSyncStore<PersistRecord<{ count: number }>>();
+  const { store } = createSyncStore<CounterState>();
 
-  assert.deepEqual(restoreStateSync(counter, { key: "counter", store }), {
+  assert.deepEqual(restoreSync(counter, { key: "counter", store }), {
     status: "missing",
   });
   assert.equal(counter.count, 0);
 });
 
-test("bindPersistenceSync restores selected keys through pickStateCodec", async () => {
-  const Search = new SigmaType<{
-    draft: string;
-    page: number;
-  }>()
-    .defaultState({
-      draft: "",
-      page: 1,
-    })
-    .actions({
-      nextPage() {
-        this.page += 1;
-      },
-      setDraft(draft: string) {
-        this.draft = draft;
-      },
-    });
-
-  const { records, store, writes } = createSyncStore<PersistRecord<{ draft: string }>>();
+test("hydrateSync restores selected keys through pick", async () => {
+  const { records, store, writes } = createSyncStore<Pick<SearchState, "draft">>();
   records.set("search", {
     savedAt: 100,
     value: { draft: "restored" },
@@ -109,9 +128,9 @@ test("bindPersistenceSync restores selected keys through pickStateCodec", async 
   });
 
   const search = new Search({ page: 5 });
-  const handle = bindPersistenceSync(search, {
-    codec: pickStateCodec(["draft"]),
+  const handle = hydrateSync(search, {
     key: "search",
+    pick: ["draft"],
     store,
   });
 
@@ -133,20 +152,10 @@ test("bindPersistenceSync restores selected keys through pickStateCodec", async 
   await handle.stop();
 });
 
-test("persistState coalesces microtask writes to the latest committed snapshot", async () => {
-  const Counter = new SigmaType<{ count: number }>()
-    .defaultState({
-      count: 0,
-    })
-    .actions({
-      increment() {
-        this.count += 1;
-      },
-    });
-
+test("persist coalesces microtask writes to the latest committed snapshot", async () => {
   const counter = new Counter();
-  const { store, writes } = createSyncStore<PersistRecord<{ count: number }>>();
-  const handle = persistState(counter, {
+  const { store, writes } = createSyncStore<CounterState>();
+  const handle = persist(counter, {
     key: "counter",
     store,
   });
@@ -163,22 +172,12 @@ test("persistState coalesces microtask writes to the latest committed snapshot",
   await handle.stop();
 });
 
-test("persistState supports debounced writes", async () => {
+test("persist supports debounced writes", async () => {
   vi.useFakeTimers();
 
-  const Counter = new SigmaType<{ count: number }>()
-    .defaultState({
-      count: 0,
-    })
-    .actions({
-      increment() {
-        this.count += 1;
-      },
-    });
-
   const counter = new Counter();
-  const { store, writes } = createSyncStore<PersistRecord<{ count: number }>>();
-  const handle = persistState(counter, {
+  const { store, writes } = createSyncStore<CounterState>();
+  const handle = persist(counter, {
     key: "counter",
     schedule: { debounceMs: 50 },
     store,
@@ -199,19 +198,9 @@ test("persistState supports debounced writes", async () => {
 });
 
 test("clear removes stored state and keeps future persistence active", async () => {
-  const Counter = new SigmaType<{ count: number }>()
-    .defaultState({
-      count: 0,
-    })
-    .actions({
-      increment() {
-        this.count += 1;
-      },
-    });
-
   const counter = new Counter();
-  const { records, store } = createSyncStore<PersistRecord<{ count: number }>>();
-  const handle = persistState(counter, {
+  const { records, store } = createSyncStore<CounterState>();
+  const handle = persist(counter, {
     key: "counter",
     store,
   });
@@ -230,18 +219,8 @@ test("clear removes stored state and keeps future persistence active", async () 
   await handle.stop();
 });
 
-test("bindPersistence restores asynchronously before persisting future changes", async () => {
-  const Counter = new SigmaType<{ count: number }>()
-    .defaultState({
-      count: 0,
-    })
-    .actions({
-      increment() {
-        this.count += 1;
-      },
-    });
-
-  const { records, store } = createAsyncStore<PersistRecord<{ count: number }>>([
+test("hydrate restores asynchronously before persisting future changes", async () => {
+  const { records, store } = createAsyncStore<CounterState>([
     [
       "counter",
       {
@@ -253,7 +232,7 @@ test("bindPersistence restores asynchronously before persisting future changes",
   ]);
 
   const counter = new Counter();
-  const handle = bindPersistence(counter, {
+  const handle = hydrate(counter, {
     key: "counter",
     store,
   });

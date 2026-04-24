@@ -6,7 +6,7 @@ import { SigmaTarget } from "./sigma.js";
 export type Listenable = SigmaTarget<any, any> | EventTarget;
 
 type InferEventMap<TTarget extends Listenable> =
-  TTarget extends SigmaTarget<any, infer TEvents>
+  TTarget extends SigmaTarget<infer TEvents, any>
     ? TEvents
     : TTarget extends Window
       ? WindowEventMap
@@ -62,7 +62,7 @@ export function listen<TTarget extends Listenable, TEvent extends InferEventType
   listener: InferListener<TTarget, TEvent>,
 ): Cleanup;
 
-export function listen(target: Listenable, name: string, listener: (event: unknown) => void) {
+export function listen(target: Listenable, name: string, listener: (...args: any[]) => void) {
   if (target instanceof SigmaTarget) {
     target[listenersSymbol].addListener(name, listener);
     return () => {

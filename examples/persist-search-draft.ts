@@ -1,29 +1,32 @@
-import { SigmaType } from "preact-sigma";
-import {
-  bindPersistenceSync,
-  pickStateCodec,
-  type PersistRecord,
-  type SyncPersistStore,
-} from "preact-sigma/persist";
+import { Sigma } from "preact-sigma";
+import { hydrateSync, type PersistRecord, type SyncPersistStore } from "preact-sigma/persist";
 
-const Search = new SigmaType<{
+type SearchState = {
   draft: string;
   page: number;
-}>("Search")
-  .defaultState({
-    draft: "",
-    page: 1,
-  })
-  .actions({
-    nextPage() {
-      this.page += 1;
-    },
-    setDraft(draft: string) {
-      this.draft = draft;
-    },
-  });
+};
 
-const records = new Map<string, PersistRecord<{ draft: string }>>([
+class Search extends Sigma<SearchState> {
+  constructor(initialState: Partial<SearchState> = {}) {
+    super({
+      draft: "",
+      page: 1,
+      ...initialState,
+    });
+  }
+
+  nextPage() {
+    this.page += 1;
+  }
+
+  setDraft(draft: string) {
+    this.draft = draft;
+  }
+}
+
+interface Search extends SearchState {}
+
+const records = new Map<string, PersistRecord<Pick<SearchState, "draft">>>([
   [
     "search",
     {
@@ -34,7 +37,7 @@ const records = new Map<string, PersistRecord<{ draft: string }>>([
   ],
 ]);
 
-const store: SyncPersistStore<PersistRecord<{ draft: string }>> = {
+const store: SyncPersistStore<Pick<SearchState, "draft">> = {
   read(key) {
     return records.get(key);
   },
@@ -47,9 +50,9 @@ const store: SyncPersistStore<PersistRecord<{ draft: string }>> = {
 };
 
 const search = new Search({ page: 3 });
-const persistence = bindPersistenceSync(search, {
-  codec: pickStateCodec(["draft"]),
+const persistence = hydrateSync(search, {
   key: "search",
+  pick: ["draft"],
   store,
 });
 

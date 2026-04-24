@@ -2,7 +2,7 @@
 
 ## Purpose
 
-`preact-sigma` is a typed state-model builder for Preact and TypeScript. It keeps top-level public state reactive, derived reads local to the model, writes explicit through actions, and side effects owned by explicit setup.
+`preact-sigma` is a typed state-model layer for Preact and TypeScript. It keeps top-level public state reactive, derived reads local to the model, writes explicit through class actions, and side effects owned by explicit setup.
 
 ## Installation
 
@@ -13,22 +13,27 @@ npm install preact-sigma @preact/signals immer preact
 ## Quick Example
 
 ```ts
-import { SigmaType } from "preact-sigma";
+import { Sigma } from "preact-sigma";
 
-const Counter = new SigmaType<{ count: number }>("Counter")
-  .defaultState({
-    count: 0,
-  })
-  .computed({
-    doubled() {
-      return this.count * 2;
-    },
-  })
-  .actions({
-    increment() {
-      this.count += 1;
-    },
-  });
+type CounterState = { count: number };
+
+class Counter extends Sigma<CounterState> {
+  constructor() {
+    super({
+      count: 0,
+    });
+  }
+
+  get doubled() {
+    return this.count * 2;
+  }
+
+  increment() {
+    this.count += 1;
+  }
+}
+
+interface Counter extends CounterState {}
 
 const counter = new Counter();
 
@@ -43,4 +48,4 @@ console.log(counter.doubled); // 2
 - Concepts, lifecycle, invariants, and API selection live in [`docs/context.md`](./docs/context.md).
 - Persistence-specific guidance lives in [`docs/persist.md`](./docs/persist.md).
 - Runnable usage patterns live in [`examples/`](./examples/), starting with [`examples/basic-counter.ts`](./examples/basic-counter.ts) and [`examples/command-palette.tsx`](./examples/command-palette.tsx).
-- Exact exported signatures live in `dist/*.d.mts` after `pnpm build`.
+- Exact exported signatures and public API comments live in `dist/index.d.mts` and `dist/persist.d.mts` after `pnpm build`.

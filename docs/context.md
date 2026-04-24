@@ -1,12 +1,12 @@
 # Overview
 
-`preact-sigma` builds reusable state models from one definition. A configured `SigmaType` owns top-level state, derived reads, writes, setup handlers, and typed events. Each top-level state property is exposed as a reactive public property backed by its own Preact signal, while actions use Immer-style mutation semantics to publish committed state. For event-only flows, `SigmaTarget` provides a standalone typed event hub with no managed state.
+`preact-sigma` builds reusable state models as TypeScript classes. A `Sigma<TState>` subclass owns top-level state, derived reads, writes, and setup. A `SigmaTarget<TEvents, TState>` subclass adds typed events. Each top-level state key is exposed as a reactive public property backed by a Preact signal, while actions use Immer-style mutation semantics to publish committed state.
 
 # When to Use
 
 - State, derived reads, mutations, and lifecycle need to stay together.
-- You need multiple instances of the same model.
-- Public reads should stay reactive and readonly while writes stay explicit.
+- You need multiple instances of the same model class.
+- Public reads should stay reactive while writes stay explicit.
 - A model needs to own timers, subscriptions, listeners, nested setup, or other cleanup-aware resources.
 - Components should consume the same model shape used outside Preact.
 
@@ -19,105 +19,106 @@
 
 # Core Abstractions
 
-- Sigma type: the builder returned by `new SigmaType<TState, TEvents>()`. After configuration, it is also the constructor for instances.
-- Sigma state: an instance created from a configured sigma type.
-- Sigma target: a standalone typed event hub created with `new SigmaTarget<TEvents>()` when you need typed events without managed state.
-- State property: a top-level key from `TState`. Each one becomes a readonly reactive public property and gets its own signal.
-- Computed: an argument-free derived getter declared with `.computed(...)`.
-- Query: a reactive read that accepts arguments, declared with `.queries(...)` or built locally with `query(fn)`.
-- Action: a method declared with `.actions(...)` that reads and writes through sigma's draft and commit semantics.
-- Setup handler: a function declared with `.setup(...)` that owns side effects and cleanup resources explicitly.
-- Event: a typed notification emitted through `this.emit(...)` and observed through `listen(...)` or `useListener(...)`.
+- Sigma class: a class that extends `Sigma<TState>` and passes its initial top-level state to `super(...)`. The `TState` argument drives helper typing for subscriptions, signals, and replacement snapshots; a same-named merged interface gives direct property reads their instance types.
+- Sigma target: a class that extends `SigmaTarget<TEvents, TState>` when it also emits typed events. Use `SigmaTarget<TEvents>` for event-only targets.
+- State property: a top-level key from `TState`. Each key becomes a reactive public property and has its own signal.
+- Computed: an argument-free derived getter on the class prototype.
+- Query: a reactive read method that accepts arguments and is marked with the `query` decorator.
+- Action: a prototype method that is not marked as a query. Actions read and write through sigma's draft and commit semantics.
+- Setup handler: an optional `onSetup(...)` method that owns side effects and returns cleanup resources.
+- Event: a typed notification emitted with `this.emit(...)` inside an action and observed through `listen(...)` or `useListener(...)`.
+- Protected view: the readonly consumer view returned by `protect(...)` and `useSigma(...)`.
 
 # Data Flow / Lifecycle
 
-1. Define a sigma type with `new SigmaType<TState, TEvents>()`. Let later builder methods infer names and types from the objects you pass to them.
-2. Add `defaultState(...)` for top-level public state and optional per-instance initializers.
-3. Add `computed(...)`, `queries(...)`, and `actions(...)` for derived reads and writes.
-4. Instantiate the configured type. Constructor input shallowly overrides `defaultState(...)`.
+1. Define a class that extends `Sigma<TState>` or `SigmaTarget<TEvents, TState>`.
+2. Define the state as a named type, pass it to `Sigma<TState>`, then merge `interface Model extends ModelState {}` after the class so direct property reads are typed.
+3. Add getters for computed values, `@query` methods for argument-based reactive reads, and ordinary methods for actions.
+4. Instantiate the class. Constructor input can be merged with defaults before `super(...)` when instances need partial overrides.
 5. Read state, computeds, and queries reactively from the public instance.
-6. Mutate state inside actions. Sync nested actions on the same instance share one draft. Boundaries like `await`, `emit(...)`, or separate action invocations may require `this.commit()` before the boundary.
-7. Run `setup(...)` explicitly when the instance should start owning side effects. `useSigma(...)` does this automatically for component-owned instances that define setup.
+6. Mutate state inside actions. Synchronous actions publish automatically when they return, and sync nested actions on the same instance share one draft. Call `this.commit()` only when unpublished changes must cross a boundary, such as before an `await`, before the action promise resolves, before `emit(...)`, or before invoking another instance's action.
+7. Run `setup(...)` explicitly when the instance should start owning side effects. `useSigma(...)` does this automatically for component-owned instances that define `onSetup(...)`.
 8. Dispose the cleanup returned from `setup(...)` when the owned resources should stop.
 
 # Common Tasks -> Recommended APIs
 
-- Define reusable model state: `new SigmaType<TState, TEvents>().defaultState(...)`
-- Derive an argument-free value: `.computed(...)`
-- Derive a reactive read with arguments: `.queries(...)`
-- Keep a tracked helper local to one consumer module: `query(fn)`
-- Mutate state and emit typed notifications: `.actions(...)`
-- Publish before `await`, `emit(...)`, or another action boundary: `this.commit()`
-- React to committed state changes: `sigma.subscribe(instance, handler)` or `sigma.subscribe(instance, key, handler)`
-- Read one top-level state property or computed as a `ReadonlySignal`: `sigma.getSignal(instance, key)`
-- Own timers, listeners, subscriptions, or nested setup: `.setup(...)`
-- Use a sigma state inside a component: `useSigma(...)`
-- Subscribe to sigma or DOM events in a component: `useListener(...)`
-- Create a standalone typed event hub with no managed state: `new SigmaTarget<TEvents>()`, `hub.emit(...)`, and `listen(hub, ...)`
-- Subscribe outside components: `listen(instance, ...)`
-- Read or restore committed top-level state: `sigma.getState(...)` and `sigma.replaceState(...)`
+- Define reusable model state: `class Model extends Sigma<TState>`.
+- Define reusable model state with events: `class Model extends SigmaTarget<TEvents, TState>`.
+- Merge partial constructor input with defaults: `mergeDefaults(initial, defaults)`.
+- Derive an argument-free value: a class getter.
+- Derive a reactive read with arguments: an `@query` class method.
+- Mutate state and emit typed notifications: ordinary class methods plus `this.emit(...)`.
+- Publish unpublished changes before `await`, `emit(...)`, promise resolution, or another instance's action: `this.commit()`.
+- React to committed state changes: `sigma.subscribe(instance, handler)` or `sigma.subscribe(instance, key, handler)`.
+- Read one top-level state property as a `ReadonlySignal`: `sigma.getSignal(instance, key)`.
+- Own timers, listeners, subscriptions, or nested setup: `onSetup(...)` plus `setup(...)`.
+- Use a sigma instance inside a component: `useSigma(...)`.
+- Subscribe to sigma or DOM events in a component: `useListener(...)`.
+- Subscribe outside components: `listen(instance, ...)`.
+- Read or restore committed top-level state: `sigma.captureState(...)` and `sigma.replaceState(...)`.
 
 # Recommended Patterns
 
-- Put explicit type arguments on `new SigmaType<TState, TEvents>()` and let later builder methods infer from the objects you pass.
+- Put the state shape in a named `State` type, pass it to `Sigma<TState>` or `SigmaTarget<TEvents, TState>`, then merge a same-named interface with the class for direct property typing.
 - Keep frequently read values as separate top-level state properties. Each top-level key gets its own signal.
-- Use `.computed(...)` for argument-free derived reads.
-- Use `.queries(...)` for tracked reads with arguments.
-- Keep one-off calculations local until they become reusable model behavior.
-- Use ordinary actions for routine writes. Reserve `sigma.getState(...)` and `sigma.replaceState(...)` for replay, reset, or undo-like flows on committed top-level state.
-- Prefer `listen(...)` for external event subscriptions. It works with sigma states, `SigmaTarget`, and DOM targets.
-- Put owned side effects in `.setup(...)`.
-- Use `sigma.subscribe(this, ...)` inside `.setup(...)` when a setup-owned side effect should react to future committed publishes. Return that cleanup so the subscription stops with setup.
+- Use getters for argument-free derived reads.
+- Use `@query` for tracked reads with arguments.
+- Use ordinary actions for routine writes. Reserve `sigma.captureState(...)` and `sigma.replaceState(...)` for replay, reset, restore, or undo-like flows on committed top-level state.
+- Emit directly from actions that have no unpublished draft changes. After mutating state, publish first with `this.commit(); this.emit(...)`.
+- Prefer `listen(...)` for external event subscriptions. It works with sigma targets and DOM targets.
+- Put owned side effects in `onSetup(...)`.
+- Use `sigma.subscribe(this, ...)` inside `onSetup(...)` when a setup-owned side effect should react to future committed publishes. Return that cleanup so the subscription stops with setup.
   ```ts
-  .setup(function () {
+  onSetup() {
     return [
-      sigma.subscribe(this, (change) => {
-        console.log(change.newState);
+      sigma.subscribe(this, (nextState, baseState) => {
+        console.log(baseState, nextState);
       }),
     ];
-  })
+  }
   ```
 - Use `this.act(function () { ... })` for setup-owned callbacks that need action semantics.
 
 # Patterns to Avoid
 
 - Reaching for `sigma.getSignal(instance, key)` when direct property reads already cover the use case.
-- Crossing `emit(...)`, `await`, or another action boundary with unpublished changes when those changes need to stay visible afterward. Publish them first with `this.commit()`.
+- Crossing `emit(...)`, `await`, promise resolution, or another instance's action with unpublished changes. Publish them first with `this.commit()`.
 - Starting side effects during construction instead of through explicit `setup(...)`.
-- Encoding storage, hydration, or migration policy directly into `SigmaType` definitions.
+- Encoding storage, hydration, or migration policy directly into model classes.
 - Treating query calls as memoized across invocations.
 - Relying on patch payloads without enabling Immer patches first.
 
 # Invariants and Constraints
 
-- Sigma only tracks top-level state properties. Each top-level key gets its own signal.
-- Public state is readonly outside actions and `this.act(...)` inside setup.
-- Duplicate names across state properties, computeds, queries, and actions are rejected at runtime. Reserved public names include `act`, `commit`, `emit`, and `setup`.
+- Sigma tracks top-level state properties. Each top-level key gets its own signal.
+- Protected consumer views expose immutable state and callable actions.
+- Published draftable public state is deep-frozen by default. `setAutoFreeze(false)` disables that behavior globally.
 - Query calls are reactive at the call site but do not memoize across invocations.
 - Setup handlers return arrays of cleanup resources, and cleanup runs in reverse order.
 - Call Immer's `enablePatches()` before relying on `sigma.subscribe(instance, handler, { patches: true })`.
-- `sigma.replaceState(...)` works on committed top-level state and requires the exact state-key shape.
-- Published draftable public state is deep-frozen by default. `setAutoFreeze(false)` disables that behavior globally.
+- `sigma.replaceState(...)` works on committed top-level state and requires a plain object snapshot.
+- `SigmaTarget.emit(...)` runs from an action and requires no active unpublished draft. It does not need a `commit(...)` callback.
 
 # Error Model
 
 - Crossing an action boundary with unpublished changes throws until `this.commit()` publishes them. Async actions also reject when they finish with unpublished changes.
-- If another invocation crosses a boundary while unpublished changes still exist, sigma warns and discards those changes before continuing.
-- Calling `setup(...)` on a sigma state without registered setup handlers throws.
-- Cleanup rethrows an `AggregateError` when more than one cleanup resource fails.
-- `sigma.replaceState(...)` throws when the replacement value is not a plain object, has the wrong top-level keys, or runs while an action still owns unpublished changes.
+- Calling `commit(...)` outside an action throws.
+- Calling `act(...)` outside an `onSetup(...)` setup context throws.
+- Calling `emit(...)` outside an action or before committing the active draft throws.
+- `sigma.replaceState(...)` throws when the replacement value is not a plain object or when an action still owns unpublished changes.
+- Starting an action on another sigma instance while the current instance has an active action context throws.
 
 # Terminology
 
 - Draft boundary: a point where sigma cannot keep reusing the current unpublished draft.
 - Committed state: the published top-level public state visible outside the current action draft.
-- Signal access: reading the underlying `ReadonlySignal` for a top-level state key or computed through `sigma.getSignal(instance, key)`.
-- Cleanup resource: a cleanup function, `AbortController`, object with `dispose()`, or object with `[Symbol.dispose]()`.
+- Signal access: reading the underlying `ReadonlySignal` for a top-level state key through `sigma.getSignal(instance, key)`.
+- Cleanup resource: a cleanup function, object with `dispose()`, or object with `[Symbol.dispose]()`.
 - Nested sigma state: a sigma-state instance stored in top-level state as a value; it stays usable as a value rather than exposing its internals through parent actions.
 
 # Non-Goals
 
-- Replacing every plain-signal use case with a builder abstraction.
+- Replacing every plain-signal use case with a class abstraction.
 - Hiding lifecycle behind implicit setup or constructor side effects.
 - Memoizing every query call or turning queries into a global cache.
 - Acting as a large tutorial framework or hand-maintained API reference. Exact signatures come from declaration output, and factual behavior lives beside source.

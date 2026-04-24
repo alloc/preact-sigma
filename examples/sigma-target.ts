@@ -1,12 +1,24 @@
 import { listen, SigmaTarget } from "preact-sigma";
 
-const notifications = new SigmaTarget<{
+type NotificationEvents = {
   saved: {
     id: string;
     title: string;
   };
   reset: void;
-}>();
+};
+
+class Notifications extends SigmaTarget<NotificationEvents> {
+  saved(id: string, title: string) {
+    this.emit("saved", { id, title });
+  }
+
+  reset() {
+    this.emit("reset");
+  }
+}
+
+const notifications = new Notifications();
 
 const stopSaved = listen(notifications, "saved", ({ id, title }) => {
   console.log(`Saved ${id}: ${title}`);
@@ -16,11 +28,8 @@ const stopReset = listen(notifications, "reset", () => {
   console.log("Reset");
 });
 
-notifications.emit("saved", {
-  id: "note-1",
-  title: "Draft post",
-});
-notifications.emit("reset");
+notifications.saved("note-1", "Draft post");
+notifications.reset();
 
 stopSaved();
 stopReset();

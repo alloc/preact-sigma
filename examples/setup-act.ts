@@ -1,14 +1,19 @@
-import { listen, SigmaType } from "preact-sigma";
+import { listen, Sigma } from "preact-sigma";
 
-const ClickTracker = new SigmaType<{
+type ClickTrackerState = {
   clicks: number;
   status: "idle" | "ready";
-}>("ClickTracker")
-  .defaultState({
-    clicks: 0,
-    status: "idle",
-  })
-  .setup(function (target: EventTarget) {
+};
+
+class ClickTracker extends Sigma<ClickTrackerState> {
+  constructor() {
+    super({
+      clicks: 0,
+      status: "idle",
+    });
+  }
+
+  onSetup(target: EventTarget) {
     this.act(function () {
       this.status = "ready";
     });
@@ -20,7 +25,10 @@ const ClickTracker = new SigmaType<{
         });
       }),
     ];
-  });
+  }
+}
+
+interface ClickTracker extends ClickTrackerState {}
 
 const target = new EventTarget();
 const tracker = new ClickTracker();
