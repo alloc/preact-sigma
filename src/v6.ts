@@ -22,11 +22,13 @@ export function setAutoFreeze(autoFreeze: boolean) {
 }
 
 const signalSuffix = "$";
+const typeSymbol = Symbol("type");
 const instanceSymbol = Symbol("instance");
-const subscriptionCache = new WeakMap<Sigma<any>, Set<Function>>();
-const patchesEnabledCache = new WeakSet<Function>();
-const initializationCache = new WeakSet<Function>();
+const changeListenersMap = new WeakMap<Sigma<any>, Set<Function>>();
+const patchListeners = new WeakSet<Function>();
+const initializedTypes = new WeakSet<Function>();
 const queries = new WeakSet<Function>();
+const emptySentinel: any = {};
 
 let activeInstance: Sigma<any> | null = null;
 let activeDraft: any;
@@ -47,12 +49,64 @@ function clearActiveInstance() {
   activeDraft = null;
 }
 
+function isStateKey(instance: Sigma<any>, key: string): boolean {
+  return Object.hasOwn(instance, key + signalSuffix);
+}
+
 function getStateSignal(instance: Sigma<any>, key: string) {
   return (instance as any)[key + signalSuffix] as Signal<any> | undefined;
 }
 
-function isStateKey(instance: Sigma<any>, key: string): boolean {
-  return Object.hasOwn(instance, key + signalSuffix);
+function captureState<TState extends object>(instance: Sigma<TState>): immer.Immutable<TState> {
+  return Object.freeze({ ...instance }) as any;
+}
+
+function createDraft<TState extends object>(instance: Sigma<TState>): immer.Draft<TState> {
+  return immer.createDraft({ ...instance }) as any;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function hasPatchListeners(instance: Sigma<any>) {
+  const listeners = changeListenersMap.get(instance);
+  if (!listeners) {
+    return false;
+  }
+  for (const sub of listeners) {
+    if (patchListeners.has(sub)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function publishState(
+  instance: Sigma<any>,
+  nextState: Record<string, unknown>,
+  baseState: Record<string, unknown>,
+  patches?: immer.Patch[],
+  inversePatches?: immer.Patch[],
+) {
+  batch(() => {
+    for (const key in nextState) {
+      const nextValue = nextState[key];
+      if (autoFreezeEnabled) {
+        immer.freeze(nextValue, true);
+      }
+      getStateSignal(instance, key)!.value = nextValue;
+    }
+  });
+
+  const changeListeners = changeListenersMap.get(instance);
+  changeListeners?.forEach((listener) => {
+    listener(nextState, baseState, patches, inversePatches);
+  });
 }
 
 function createActionContext<TState extends object>(instance: Sigma<TState>) {
@@ -65,7 +119,7 @@ function createActionContext<TState extends object>(instance: Sigma<TState>) {
         }
         const { value } = getStateSignal(target, key)!;
         if (immer.isDraftable(value)) {
-          activeDraft = immer.createDraft({ ...instance });
+          activeDraft = createDraft(instance);
           return activeDraft[key];
         }
         return value;
@@ -78,7 +132,7 @@ function createActionContext<TState extends object>(instance: Sigma<TState>) {
     set(target, key, value) {
       if (typeof key === "string" && isStateKey(target, key)) {
         ensureActiveInstance(instance);
-        activeDraft ??= immer.createDraft({ ...instance });
+        activeDraft ??= createDraft(instance);
         activeDraft[key] = value;
         return true;
       }
@@ -91,33 +145,24 @@ function getActionInstance(context: object) {
   return (context as { [instanceSymbol]: Sigma<any> })[instanceSymbol];
 }
 
-function castArrayIfExists<T>(value: Iterable<T> | undefined) {
-  return value ? [...value] : undefined;
-}
-
 function ensureDraftCommitted(instance: Sigma<any>) {
   if (activeInstance && instance !== activeInstance) {
     throw new Error("Draft was not committed before an external action was invoked.");
   }
+
+  activeInstance = null;
   if (!activeDraft) {
-    activeInstance = null;
     return false;
   }
 
   const draft = activeDraft;
   activeDraft = null;
 
-  const subscriptions = castArrayIfExists(subscriptionCache.get(instance));
-  activeInstance = null;
-
-  const patchesEnabled = subscriptions
-    ? [...subscriptions].some((subscription) => patchesEnabledCache.has(subscription))
-    : false;
-
   let patches: immer.Patch[] | undefined;
   let inversePatches: immer.Patch[] | undefined;
   let patchListener: immer.PatchListener | undefined;
-  if (patchesEnabled) {
+
+  if (hasPatchListeners(instance)) {
     patchListener = (nextPatches, nextInversePatches) => {
       patches = nextPatches;
       inversePatches = nextInversePatches;
@@ -129,20 +174,7 @@ function ensureDraftCommitted(instance: Sigma<any>) {
   const changed = baseState !== nextState;
 
   if (changed) {
-    batch(() => {
-      for (const key in nextState) {
-        const nextValue = nextState[key];
-        if (autoFreezeEnabled) {
-          immer.freeze(nextValue, true);
-        }
-        const signal = (instance as any)[key + signalSuffix] as Signal<any>;
-        signal.value = nextValue;
-      }
-    });
-
-    subscriptions?.forEach((subscription) =>
-      subscription(nextState, baseState, patches, inversePatches),
-    );
+    publishState(instance, nextState, baseState, patches, inversePatches);
   }
 
   return changed;
@@ -225,16 +257,13 @@ function disposeCleanupResource(resource: AnyResource) {
   }
 }
 
-const emptySentinel: any = {};
-const typeSymbol = Symbol("type");
-
-function act(this: Sigma<any>, fn: (this: typeof this) => void) {
+function act(this: Sigma<any>, fn: (this: any) => void) {
   const instance = getActionInstance(this);
   if (instance !== this) {
     throw new Error("Cannot act() from inside an action.");
   }
   ensureActiveInstance(instance);
-  activeDraft = immer.createDraft({ ...instance });
+  activeDraft = createDraft(instance);
   try {
     const context = createActionContext(instance);
     const result = action(fn).call(context);
@@ -248,37 +277,41 @@ function act(this: Sigma<any>, fn: (this: typeof this) => void) {
   ensureDraftCommitted(instance);
 }
 
-export abstract class Sigma<TState extends object> {
-  declare [typeSymbol]: TState;
+function defineSignalProperty(instance: Sigma<any>, key: string, value: any) {
+  Object.defineProperty(instance, key + signalSuffix, {
+    value: createSignal(value),
+  });
+  if (!Object.hasOwn(instance.constructor.prototype, key)) {
+    Object.defineProperty(instance.constructor.prototype, key, {
+      get() {
+        return this[key + signalSuffix].value;
+      },
+      enumerable: true,
+    });
+  }
+}
 
-  get [instanceSymbol]() {
+export abstract class Sigma<TState extends object> {
+  declare [typeSymbol]: { state: TState; events: unknown };
+
+  protected get [instanceSymbol]() {
     return this;
   }
 
   constructor(initialState: TState) {
-    if (!initializationCache.has(this.constructor)) {
+    if (!initializedTypes.has(this.constructor)) {
       initializePrototype(this.constructor.prototype);
-      initializationCache.add(this.constructor);
+      initializedTypes.add(this.constructor);
     }
     if (initialState === emptySentinel) {
-      return; // SigmaTarget without
+      return; // SigmaTarget without any state
     }
     for (const key in initialState) {
       const initialValue = initialState[key];
       if (autoFreezeEnabled) {
         immer.freeze(initialValue, true);
       }
-      Object.defineProperty(this, key + signalSuffix, {
-        value: createSignal(initialValue),
-      });
-      if (!Object.hasOwn(this.constructor.prototype, key)) {
-        Object.defineProperty(this.constructor.prototype, key, {
-          get() {
-            return (this as any)[key + signalSuffix].value;
-          },
-          enumerable: true,
-        });
-      }
+      defineSignalProperty(this, key, initialValue);
     }
   }
 
@@ -324,6 +357,7 @@ export abstract class Sigma<TState extends object> {
 }
 
 export class SigmaTarget<TState extends object = {}, TEvents = {}> extends Sigma<TState> {
+  declare [typeSymbol]: { state: TState; events: TEvents };
   #listeners = new SigmaListenerMap();
 
   constructor(state?: TState) {
@@ -363,19 +397,19 @@ export const sigma = /* @__PURE__ */ Object.freeze({
     const options = listenerOrOptions as { patches: boolean } | undefined;
 
     if (options?.patches) {
-      patchesEnabledCache.add(listener);
+      patchListeners.add(listener);
     }
 
-    let subscriptions = subscriptionCache.get(instance);
+    let subscriptions = changeListenersMap.get(instance);
     if (!subscriptions) {
       subscriptions = new Set();
-      subscriptionCache.set(instance, subscriptions);
+      changeListenersMap.set(instance, subscriptions);
     }
     subscriptions.add(listener);
     return () => {
       subscriptions.delete(listener);
       if (!subscriptions.size) {
-        subscriptionCache.delete(instance);
+        changeListenersMap.delete(instance);
       }
     };
   }) as {
@@ -420,14 +454,49 @@ export const sigma = /* @__PURE__ */ Object.freeze({
     return getStateSignal(instance, key)!;
   },
 
-  getState<TState extends object>(instance: Sigma<TState>): Protected<TState> {
-    return { ...instance } as any;
+  captureState<TState extends object>(instance: Sigma<TState>): immer.Immutable<TState> {
+    return captureState(instance);
   },
 
-  replaceState<TState extends object>(target: Sigma<TState>, nextState: Protected<TState>) {
+  replaceState<TState extends object>(target: Sigma<TState>, nextState: TState) {
+    if (!isPlainObject(nextState)) {
+      throw new Error("[preact-sigma] replaceState() requires a plain object snapshot");
+    }
+    if (activeDraft) {
+      throw new Error(
+        `[preact-sigma] replaceState() cannot run while an action has unpublished changes.`,
+      );
+    }
+
     const instance = getActionInstance(target);
-    instance.act(function () {
-      Object.assign(this, nextState);
+
+    act.call(instance, function () {
+      const prevKeys = Object.keys(this) as (string & keyof TState)[];
+      const nextKeys = Object.keys(nextState) as (string & keyof TState)[];
+
+      // Update existing keys and define new ones
+      for (const key of nextKeys) {
+        const nextValue = nextState[key];
+        if (autoFreezeEnabled) {
+          immer.freeze(nextValue, true);
+        }
+        const signal = getStateSignal(this, key);
+        if (signal) {
+          signal.value = nextValue;
+        } else {
+          defineSignalProperty(this, key, nextValue);
+        }
+      }
+
+      // Reset missing keys to undefined
+      for (const key of prevKeys) {
+        if (!nextKeys.includes(key)) {
+          const signal = getStateSignal(this, key);
+          if (signal) {
+            signal.value = undefined;
+          }
+        }
+      }
     });
   },
 });
@@ -462,12 +531,12 @@ function depsChanged<T>(container: RefObject<T | null>, deps?: readonly any[]) {
   return false;
 }
 
-const protectedKeys = ["emit", "commit", "act", "protect", "onSetup"] as const;
-
-type ProtectedKey = typeof typeSymbol | (typeof protectedKeys)[number];
-
 const protectedSymbol = Symbol("protected");
 
+// Keys hidden by the Protected type.
+type ProtectedKey = typeof typeSymbol | "act" | "commit" | "emit" | "onSetup" | "protect";
+
+// This makes it less likely for Protected<T> to be erased by the type system.
 type BrandProtected<T> = T & { [protectedSymbol]: true };
 
 export type Protected<T> = BrandProtected<
