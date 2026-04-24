@@ -17,6 +17,7 @@ type Cleanup = () => void;
 let autoFreezeEnabled = true;
 
 export function setAutoFreeze(autoFreeze: boolean) {
+  immer.setAutoFreeze(autoFreeze);
   autoFreezeEnabled = autoFreeze;
 }
 
@@ -187,11 +188,11 @@ function initializePrototype(prototype: object) {
         const changed = ensureDraftCommitted(instance);
         if (isPromiseLike(result)) {
           if (changed) {
-            console.warn(
+            throw new Error(
               `[preact-sigma] Action named "${key}" forgot to commit() its draft before returning a promise.`,
             );
           }
-          const onResolveAsyncAction = () => {
+          const onResolveAsyncAction = (promiseResult: any) => {
             if (activeDraft && instance === activeInstance) {
               const changed = ensureDraftCommitted(instance);
               if (changed) {
@@ -200,8 +201,9 @@ function initializePrototype(prototype: object) {
                 );
               }
             }
+            return promiseResult;
           };
-          result.then(onResolveAsyncAction);
+          return result.then(onResolveAsyncAction);
         }
 
         return result;
@@ -225,10 +227,6 @@ function disposeCleanupResource(resource: AnyResource) {
 
 const emptySentinel: any = {};
 const typeSymbol = Symbol("type");
-
-type SetupContext<T extends Sigma<any>> = Protected<T> & {
-  act: (fn: (this: T) => void) => void;
-};
 
 function act(this: Sigma<any>, fn: (this: typeof this) => void) {
   const instance = getActionInstance(this);
@@ -284,7 +282,7 @@ export abstract class Sigma<TState extends object> {
     }
   }
 
-  onSetup?(this: SetupContext<this>, ...args: any[]): readonly AnyResource[];
+  onSetup?(...args: any[]): readonly AnyResource[];
 
   setup(...args: Parameters<Extract<this["onSetup"], AnyFunction>>) {
     const setupContext = new Proxy(this, {
@@ -298,10 +296,10 @@ export abstract class Sigma<TState extends object> {
         return Reflect.get(target, key, receiver);
       },
     });
-    const resources = this.onSetup!.apply(setupContext as SetupContext<this>, args);
+    const resources = this.onSetup!.apply(setupContext, args);
     return () => {
-      for (const resource of resources) {
-        disposeCleanupResource(resource);
+      for (let i = resources.length - 1; i >= 0; i--) {
+        disposeCleanupResource(resources[i]);
       }
     };
   }
@@ -310,12 +308,13 @@ export abstract class Sigma<TState extends object> {
     return this as any;
   }
 
-  commit() {
+  commit<T = void>(callback?: (this: typeof this) => T) {
     const instance = getActionInstance(this);
     if (instance === this) {
       throw new Error("Cannot commit() from outside an action.");
     }
     ensureDraftCommitted(instance);
+    return callback?.call(instance as this);
   }
 
   // oxlint-disable-next-line no-unused-vars
@@ -575,10 +574,10 @@ export class TodoList<T> extends SigmaTarget<TodoListState<T>, TodoListEvents<T>
   // Actions (untracked, mutation allowed)
   addTodo(title: string, data: T) {
     this.todos.push({ status: "pending", title, data });
-  }
-
-  onSetup() {
-    return [];
+    this.commit(function () {
+      // Emit from inside the commit callback for access to immutable state.
+      this.emit("added", this.todos[this.todos.length - 1]);
+    });
   }
 }
 

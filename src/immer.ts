@@ -11,6 +11,7 @@ export {
   original,
   Patch,
   PatchListener,
+  setAutoFreeze,
 } from "immer";
 
 type PrimitiveType = number | string | boolean;
