@@ -3,6 +3,16 @@
 import { sigmaRefBrand, sigmaTargetBrand } from "./internal/symbols.js";
 import type { AnySigmaState } from "./internal/types.js";
 
+export {
+  createDraft,
+  finishDraft,
+  freeze,
+  isDraftable,
+  original,
+  Patch,
+  PatchListener,
+} from "immer";
+
 type PrimitiveType = number | string | boolean;
 
 /** Object types that should never be mapped */
