@@ -1,6 +1,6 @@
 import type { Immutable } from "./immer.js";
-import { sigma } from "./internal/runtime.js";
-import type { SigmaDefinition, SigmaState } from "./internal/types.js";
+import { isPlainObject } from "./internal/utils.js";
+import { sigma, type SigmaDefinition, type SigmaState } from "./sigma.js";
 
 type MaybePromise<T> = T | Promise<T>;
 
@@ -153,14 +153,6 @@ function applyRecord<T extends SigmaDefinition, TStored>(
     savedAt: record.savedAt,
     storedVersion: record.version,
   };
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    return false;
-  }
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
 }
 
 /** Restores committed state from a persisted record through an async store. */

@@ -1,6 +1,6 @@
 // Copied from: node_modules/.pnpm/immer@11.1.4/node_modules/immer/dist/immer.d.ts
 // Adapted to skip sigma-state instances.
-import { Sigma, SigmaRef } from "./v6.js";
+import type { Sigma, SigmaRef } from "./sigma.js";
 
 export {
   createDraft,

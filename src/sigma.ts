@@ -6,13 +6,16 @@ import {
   ReadonlySignal,
   Signal,
 } from "@preact/signals";
-import { RefObject } from "preact";
-import { useEffect, useRef } from "preact/hooks";
-import { AnyResource } from "./framework";
-import * as immer from "./immer";
-import { EventParameters, SigmaListenerMap } from "./listener";
-
-type Cleanup = () => void;
+import * as immer from "./immer.js";
+import { type EventParameters, SigmaListenerMap } from "./internal/listener.js";
+import { instanceSymbol, listenersSymbol, refSymbol, typeSymbol } from "./internal/symbols.js";
+import {
+  type AnyFunction,
+  type AnyResource,
+  type Cleanup,
+  isPlainObject,
+  isPromiseLike,
+} from "./internal/utils.js";
 
 let autoFreezeEnabled = true;
 
@@ -22,9 +25,6 @@ export function setAutoFreeze(autoFreeze: boolean) {
 }
 
 const signalSuffix = "$";
-const refSymbol = Symbol("ref");
-const typeSymbol = Symbol("type");
-const instanceSymbol = Symbol("instance");
 const changeListenersMap = new WeakMap<Sigma<any>, Set<Function>>();
 const patchListeners = new WeakSet<Function>();
 const initializedTypes = new WeakSet<Function>();
@@ -33,6 +33,15 @@ const emptySentinel: any = {};
 
 export type SigmaRef<T extends object = {}> = T & {
   [refSymbol]?: true;
+};
+
+export type SigmaDefinition = {
+  state: object;
+  events?: object;
+};
+
+export type SigmaState<T extends SigmaDefinition> = Sigma<T["state"]> & {
+  [typeSymbol]: T;
 };
 
 let activeInstance: Sigma<any> | null = null;
@@ -68,14 +77,6 @@ function captureState<TState extends object>(instance: Sigma<TState>): immer.Imm
 
 function createDraft<TState extends object>(instance: Sigma<TState>): immer.Draft<TState> {
   return immer.createDraft({ ...instance }) as any;
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  if (typeof value !== "object" || value === null) {
-    return false;
-  }
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
 }
 
 function hasPatchListeners(instance: Sigma<any>) {
@@ -185,10 +186,6 @@ function ensureDraftCommitted(instance: Sigma<any>) {
   return changed;
 }
 
-function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
-  return value != null && typeof (value as PromiseLike<unknown>).then === "function";
-}
-
 function initializePrototype(prototype: object) {
   const descriptors = Object.getOwnPropertyDescriptors(prototype);
   for (const key in descriptors) {
@@ -253,8 +250,6 @@ function initializePrototype(prototype: object) {
 function disposeCleanupResource(resource: AnyResource) {
   if (typeof resource === "function") {
     resource();
-  } else if (resource instanceof AbortController) {
-    resource.abort();
   } else if ("dispose" in resource) {
     resource.dispose();
   } else {
@@ -363,7 +358,7 @@ export abstract class Sigma<TState extends object> {
 
 export class SigmaTarget<TState extends object = {}, TEvents = {}> extends Sigma<TState> {
   declare [typeSymbol]: { state: TState; events: TEvents };
-  #listeners = new SigmaListenerMap();
+  protected [listenersSymbol] = new SigmaListenerMap();
 
   constructor(state?: TState) {
     super(state ?? emptySentinel);
@@ -380,7 +375,7 @@ export class SigmaTarget<TState extends object = {}, TEvents = {}> extends Sigma
     if (instance === activeInstance && activeDraft) {
       throw new Error("Cannot emit() until you commit() your draft.");
     }
-    this.#listeners.emit(name, detail);
+    this[listenersSymbol].emit(name, detail);
   }
 }
 
@@ -463,6 +458,10 @@ export const sigma = /* @__PURE__ */ Object.freeze({
     return captureState(instance);
   },
 
+  getState<TState extends object>(instance: Sigma<TState>): immer.Immutable<TState> {
+    return captureState(instance);
+  },
+
   replaceState<TState extends object>(target: Sigma<TState>, nextState: TState) {
     if (!isPlainObject(nextState)) {
       throw new Error("[preact-sigma] replaceState() requires a plain object snapshot");
@@ -506,9 +505,7 @@ export const sigma = /* @__PURE__ */ Object.freeze({
   },
 });
 
-type AnyFunction = (...args: any[]) => any;
-
-function query(method: AnyFunction, context: ClassMethodDecoratorContext<any, any>) {
+export function query(method: AnyFunction, context: ClassMethodDecoratorContext<any, any>) {
   queries.add(method);
   function queryMethod(this: any, ...args: any[]) {
     return computed(() => method.apply(this, args)).value;
@@ -518,25 +515,7 @@ function query(method: AnyFunction, context: ClassMethodDecoratorContext<any, an
   });
 }
 
-const depsCache = new WeakMap<RefObject<any>, readonly any[] | undefined>();
-
-function depsChanged<T>(container: RefObject<T | null>, deps?: readonly any[]) {
-  const cachedDeps = depsCache.get(container);
-  if (!deps && !cachedDeps) {
-    return true;
-  }
-  if (
-    deps &&
-    cachedDeps &&
-    (deps.length !== cachedDeps.length ||
-      deps.some((dep, index) => !Object.is(dep, cachedDeps[index])))
-  ) {
-    return true;
-  }
-  return false;
-}
-
-const protectedSymbol = Symbol("protected");
+declare const protectedSymbol: unique symbol;
 
 // Keys hidden by the Protected type.
 type ProtectedKey = typeof typeSymbol | "act" | "commit" | "emit" | "onSetup" | "protect";
@@ -558,102 +537,3 @@ export type Protected<T> = BrandProtected<
       }
     : never
 >;
-
-export type UseSigmaOptions<TSetup extends readonly any[] = any[]> = {
-  setup: TSetup | (() => TSetup);
-  deps?: readonly any[];
-};
-
-const isArray = Array.isArray as (value: unknown) => value is readonly any[];
-
-export type UseSigmaArgs<T extends Sigma<any>> = T extends {
-  onSetup: (...params: infer TParams) => any;
-}
-  ? [] extends TParams
-    ? [create: () => T, options?: Partial<UseSigmaOptions<TParams>>]
-    : [create: () => T, options: UseSigmaOptions<TParams>]
-  : [create: () => T, deps?: readonly any[]];
-
-export function useSigma<T extends Sigma<any>>(...args: UseSigmaArgs<T>): Protected<T>;
-export function useSigma<T extends Sigma<any>>(
-  create: () => T,
-  optionsOrDeps?: Partial<UseSigmaOptions> | readonly any[],
-) {
-  // HACK: avoid useMemo so that HMR doesn't recreate the instance
-  const container = useRef<Protected<T> | null>(null);
-
-  let setup: Partial<UseSigmaOptions>["setup"];
-  let deps: readonly any[] | undefined;
-
-  if (isArray(optionsOrDeps)) {
-    deps = optionsOrDeps;
-  } else {
-    setup = optionsOrDeps?.setup;
-    deps = optionsOrDeps?.deps;
-  }
-
-  if (!container.current || depsChanged(container, deps)) {
-    depsCache.set(container, deps);
-    container.current = create().protect();
-  }
-
-  const instance = container.current;
-
-  const setupDeps = isArray(setup) ? setup : [];
-  useEffect(() => {
-    if (Object.hasOwn(instance.constructor.prototype, "onSetup")) {
-      const setupArgs: any = setup ? (isArray(setup) ? setup : setup()) : [];
-      return instance.setup(...setupArgs);
-    }
-  }, [instance, ...setupDeps]);
-
-  return instance;
-}
-
-type Todo<T> = {
-  status: "pending" | "completed";
-  title: string;
-  data: T;
-};
-
-type TodoListState<T> = {
-  todos: Todo<T>[];
-};
-
-type TodoListEvents<T> = {
-  added: Todo<T>;
-};
-
-// Extend SigmaTarget if events are needed, otherwise extend Sigma.
-// oxlint-disable-next-line typescript/no-unsafe-declaration-merging
-export class TodoList<T> extends SigmaTarget<TodoListState<T>, TodoListEvents<T>> {
-  // Private, ephemeral, mutable state (untracked)
-  #foo = {};
-
-  // Default state is defined in the constructor
-  constructor() {
-    super({ todos: [] });
-  }
-
-  // Computeds (tracked, memoized, readonly)
-  get completedTodos() {
-    return this.todos.filter((todo) => todo.status === "completed");
-  }
-
-  // Queries (tracked, half-memoized, readonly)
-  @query findTodoBy(predicate: (todo: Todo<T>) => boolean) {
-    return this.todos.find(predicate);
-  }
-
-  // Actions (untracked, mutation allowed)
-  addTodo(title: string, data: T) {
-    this.todos.push({ status: "pending", title, data });
-    this.commit(function () {
-      // Emit from inside the commit callback for access to immutable state.
-      this.emit("added", this.todos[this.todos.length - 1]);
-    });
-  }
-}
-
-// Sadly, we need this to make the state public.
-export interface TodoList<T> extends TodoListState<T> {}

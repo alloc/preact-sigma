@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "preact/hooks";
 import { InferEventType, listen, type InferListener, type Listenable } from "../listener.js";
-import { SigmaTarget } from "../v6.js";
+import type { SigmaTarget } from "../sigma.js";
 
 /**
  * Attaches an event listener in a component and cleans it up automatically.
