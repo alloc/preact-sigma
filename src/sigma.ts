@@ -38,7 +38,7 @@ export function setAutoFreeze(autoFreeze: boolean) {
 const signalSuffix = "$";
 const changeListenersMap = new WeakMap<Sigma<any>, Set<Function>>();
 const patchListeners = new WeakSet<Function>();
-const initializedTypes = new WeakSet<Function>();
+const initializedPrototypes = new WeakSet<object>();
 const queries = new WeakSet<Function>();
 const emptySentinel: any = {};
 
@@ -60,6 +60,7 @@ export type SigmaState<T extends SigmaDefinition> = Sigma<T["state"]> & {
 
 let activeInstance: Sigma<any> | null = null;
 let activeDraft: any;
+let activeDerivedReadDepth = 0;
 
 function ensureActiveInstance(instance: Sigma<any>) {
   if (!activeInstance) {
@@ -100,6 +101,21 @@ function createSnapshot(instance: Sigma<any>) {
 
 function createDraft<TState extends object>(instance: Sigma<TState>): immer.Draft<TState> {
   return immer.createDraft(createSnapshot(instance)) as any;
+}
+
+function runDerivedRead<T>(callback: () => T): T {
+  activeDerivedReadDepth += 1;
+  try {
+    return callback();
+  } finally {
+    activeDerivedReadDepth -= 1;
+  }
+}
+
+function assertActionResult(key: string, result: any) {
+  if (immer.isDraft(result)) {
+    throw new Error(`[preact-sigma] Action named "${key}" returned an active draft.`);
+  }
 }
 
 function hasPatchListeners(instance: Sigma<any>) {
@@ -235,11 +251,10 @@ function initializePrototype(prototype: object) {
     // Computeds
     if (get) {
       descriptors[key].get = function () {
-        if (activeDraft) {
-          return get.call(this);
-        }
         const instance = getActionInstance(this);
-        const signal = ((instance as any)[key + signalSuffix] ??= computed(get.bind(instance)));
+        const signal = ((instance as any)[key + signalSuffix] ??= computed(() =>
+          runDerivedRead(() => get.call(instance)),
+        ));
         return signal.value;
       };
     }
@@ -249,16 +264,23 @@ function initializePrototype(prototype: object) {
       const actionFn = action(value);
 
       descriptors[key].value = function (this: object, ...args: any[]) {
+        if (activeDerivedReadDepth) {
+          throw new Error("[preact-sigma] Computeds and queries cannot call actions.");
+        }
+
         const instance = getActionInstance(this);
         const actionExisted = ensureActiveInstance(instance);
         if (actionExisted) {
-          return value.apply(this, args);
+          const result = value.apply(this, args);
+          assertActionResult(key, result);
+          return result;
         }
 
         let result;
         try {
           const actionContext = createActionContext(instance);
           result = actionFn.apply(actionContext, args);
+          assertActionResult(key, result);
         } catch (error) {
           clearActiveInstance();
           throw error;
@@ -292,6 +314,20 @@ function initializePrototype(prototype: object) {
   Object.defineProperties(prototype, descriptors);
 }
 
+function initializeType(type: Function) {
+  for (
+    let prototype = type.prototype;
+    prototype && prototype !== Sigma.prototype && prototype !== SigmaTarget.prototype;
+    prototype = Object.getPrototypeOf(prototype)
+  ) {
+    if (initializedPrototypes.has(prototype)) {
+      break;
+    }
+    initializePrototype(prototype);
+    initializedPrototypes.add(prototype);
+  }
+}
+
 function disposeCleanupResource(resource: AnyResource) {
   if (typeof resource === "function") {
     resource();
@@ -308,7 +344,6 @@ function act(this: Sigma<any>, fn: (this: any) => void) {
     throw new Error("Cannot act() from inside an action.");
   }
   ensureActiveInstance(instance);
-  activeDraft = createDraft(instance);
   try {
     const context = createActionContext(instance);
     const result = action(fn).call(context);
@@ -351,10 +386,7 @@ export abstract class Sigma<TState extends object> {
   }
 
   constructor(initialState: TState) {
-    if (!initializedTypes.has(this.constructor)) {
-      initializePrototype(this.constructor.prototype);
-      initializedTypes.add(this.constructor);
-    }
+    initializeType(this.constructor);
     if (initialState === emptySentinel) {
       return; // SigmaTarget without any state
     }
@@ -391,11 +423,6 @@ export abstract class Sigma<TState extends object> {
     };
   }
 
-  /** Returns a readonly consumer view that hides lifecycle and event-emitter internals. */
-  protect(): Protected<this> {
-    return this as any;
-  }
-
   /**
    * Publishes the current action draft.
    *
@@ -426,6 +453,11 @@ export abstract class Sigma<TState extends object> {
   act(fn: (this: typeof this) => void) {
     throw new Error("Cannot act() from outside an onSetup() context.");
   }
+}
+
+/** Casts a sigma instance to its readonly public consumer view. */
+export function castProtected<T extends Sigma<any>>(instance: T): Protected<T> {
+  return instance as any;
 }
 
 /**
@@ -563,44 +595,48 @@ export const sigma = /* @__PURE__ */ Object.freeze({
   },
 });
 
-/** Marks a class method as a reactive read with arguments instead of an action. */
-export function query(method: AnyFunction, context: ClassMethodDecoratorContext<any, any>) {
+/** Marks a class method as a committed-state reactive read with arguments instead of an action. */
+export function query<TThis extends object, TArgs extends any[], TReturn>(
+  method: (this: TThis, ...args: TArgs) => TReturn,
+): (this: TThis, ...args: TArgs) => TReturn {
   queries.add(method);
-  function queryMethod(this: any, ...args: any[]) {
-    return computed(() => method.apply(this, args)).value;
+  function queryMethod(this: TThis, ...args: TArgs) {
+    const instance = getActionInstance(this);
+    return computed(() => runDerivedRead(() => method.apply(instance as TThis, args))).value;
   }
-  context.addInitializer(function () {
-    this[context.name] = queryMethod;
-  });
+  queries.add(queryMethod);
+  return queryMethod;
 }
 
 declare const protectedSymbol: unique symbol;
 
 // Keys hidden by the Protected type.
 type ProtectedKey =
-  | typeof typeSymbol
+  | typeof listenersSymbol
   | typeof snapshotSymbol
   | "act"
   | "commit"
   | "emit"
-  | "onSetup"
-  | "protect";
+  | "onSetup";
 
 // This makes it less likely for Protected<T> to be erased by the type system.
 type BrandProtected<T> = T & { [protectedSymbol]: true };
 
-/** Readonly public view returned by `protect(...)` and `useSigma(...)`. */
+/** Readonly public view returned by `castProtected(...)` and `useSigma(...)`. */
 export type Protected<T extends Sigma<any>> = BrandProtected<
-  T extends { [typeSymbol]: infer TState }
+  T extends { [typeSymbol]: { state: infer TState extends object } }
     ? {
-        [K in Exclude<keyof T, ProtectedKey>]: K extends keyof TState
-          ? // Reactive state
-            immer.Immutable<T[K]>
-          : T[K] extends AnyFunction
-            ? // Actions and queries
-              (...params: Parameters<T[K]>) => immer.Immutable<ReturnType<T[K]>>
-            : // Computeds
-              immer.Immutable<T[K]>;
+        // Mapping over `keyof T` preserves TypeScript definition links for protected members.
+        [K in keyof T as K extends ProtectedKey ? never : K]: K extends typeof typeSymbol
+          ? T[K]
+          : K extends keyof TState
+            ? // Reactive state
+              immer.Immutable<T[K]>
+            : T[K] extends AnyFunction
+              ? // Actions and queries
+                (...params: Parameters<T[K]>) => immer.Immutable<ReturnType<T[K]>>
+              : // Computeds
+                immer.Immutable<T[K]>;
       }
     : never
 >;

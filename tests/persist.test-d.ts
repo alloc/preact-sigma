@@ -34,19 +34,19 @@ test("persist helpers infer state and store types", () => {
   const search = new Search();
 
   const syncStore: SyncPersistStore<SearchState> = {
-    read() {
+    get() {
       return undefined;
     },
-    write() {},
-    remove() {},
+    set() {},
+    delete() {},
   };
 
   const asyncStore = {
-    async read() {
+    async get() {
       return undefined as PersistRecord<SearchState> | undefined;
     },
-    async write() {},
-    async remove() {},
+    async set() {},
+    async delete() {},
   };
 
   const fullOptions = {
@@ -78,20 +78,20 @@ test("persist helpers infer state and store types", () => {
     codec: partialCodec,
     key: "search",
     store: {
-      read() {
+      get() {
         return undefined as PersistRecord<{ draft: string }> | undefined;
       },
-      write() {},
-      remove() {},
+      set() {},
+      delete() {},
     },
   } satisfies PersistOptions<SearchState, { draft: string }>;
 
   const pickedStore: SyncPersistStore<Pick<SearchState, "draft">> = {
-    read() {
+    get() {
       return undefined;
     },
-    write() {},
-    remove() {},
+    set() {},
+    delete() {},
   };
 
   assertType<Promise<RestoreResult>>(restore(search, partialOptions));

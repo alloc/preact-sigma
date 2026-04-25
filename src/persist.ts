@@ -33,18 +33,18 @@ export interface PersistRecord<TStored = unknown> {
   value: TStored;
 }
 
-/** Storage adapter used by persistence helpers. */
+/** Key-value storage adapter used by persistence helpers. The method names match Keyv and `Map`. */
 export interface PersistStore<TStored = unknown> {
-  read(key: string): MaybePromise<PersistRecord<TStored> | undefined>;
-  write(key: string, record: PersistRecord<TStored>): MaybePromise<void>;
-  remove(key: string): MaybePromise<void>;
+  get(key: string): MaybePromise<PersistRecord<TStored> | undefined>;
+  set(key: string, record: PersistRecord<TStored>): MaybePromise<unknown>;
+  delete(key: string): MaybePromise<unknown>;
 }
 
 /** Synchronous storage adapter used by sync restore helpers. */
 export interface SyncPersistStore<TStored = unknown> extends PersistStore<TStored> {
-  read(key: string): PersistRecord<TStored> | undefined;
-  write(key: string, record: PersistRecord<TStored>): void;
-  remove(key: string): void;
+  get(key: string): PersistRecord<TStored> | undefined;
+  set(key: string, record: PersistRecord<TStored>): unknown;
+  delete(key: string): unknown;
 }
 
 /** Codec that maps between committed sigma snapshots and stored payloads. */
@@ -58,7 +58,7 @@ export interface PersistCodec<TState extends object, TStored = Immutable<TState>
 export type PersistSchedule = "immediate" | "microtask" | { debounceMs: number };
 
 interface PersistLifecycleOptions<TState extends object> {
-  /** Storage key used for reads, writes, and removals. */
+  /** Storage key used for gets, sets, and deletes. */
   key: string;
   /** Scheduling policy for future writes. Defaults to `"microtask"`. */
   schedule?: PersistSchedule;
@@ -242,7 +242,7 @@ export async function restore<TState extends object, TStored = Immutable<TState>
   options: AnyPersistOptions<TState, TStored>,
 ): Promise<RestoreResult> {
   const codec = getCodec(options);
-  const record = (await options.store.read(options.key)) as PersistRecord<TStored> | undefined;
+  const record = (await options.store.get(options.key)) as PersistRecord<TStored> | undefined;
   return applyRecord(instance, options.key, record, codec);
 }
 
@@ -260,7 +260,7 @@ export function restoreSync<TState extends object, TStored = Immutable<TState>>(
   options: AnySyncPersistOptions<TState, TStored>,
 ): RestoreResult {
   const codec = getCodec(options);
-  const record = options.store.read(options.key) as PersistRecord<TStored> | undefined;
+  const record = options.store.get(options.key) as PersistRecord<TStored> | undefined;
   return applyRecord(instance, options.key, record, codec);
 }
 
@@ -372,7 +372,7 @@ export function persist<TState extends object, TStored = Immutable<TState>>(
       while (hasPendingState && !stopped && !suspended) {
         const state = pendingState!;
         hasPendingState = false;
-        await store.write(key, createRecord(state));
+        await store.set(key, createRecord(state));
       }
     })();
 
@@ -410,7 +410,7 @@ export function persist<TState extends object, TStored = Immutable<TState>>(
 
       try {
         await runningWrite;
-        await store.remove(key);
+        await store.delete(key);
       } finally {
         suspended = false;
         if (hasPendingState && !stopped) {
@@ -472,7 +472,7 @@ export function hydrate<TState extends object, TStored = Immutable<TState>>(
       try {
         await restored;
       } catch {
-        await options.store.remove(options.key);
+        await options.store.delete(options.key);
         return;
       }
 
@@ -480,7 +480,7 @@ export function hydrate<TState extends object, TStored = Immutable<TState>>(
         await handle.clear();
         return;
       }
-      await options.store.remove(options.key);
+      await options.store.delete(options.key);
     },
 
     async stop() {

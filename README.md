@@ -47,5 +47,6 @@ console.log(counter.doubled); // 2
 
 - Concepts, lifecycle, invariants, and API selection live in [`docs/context.md`](./docs/context.md).
 - Persistence-specific guidance lives in [`docs/persist.md`](./docs/persist.md).
+- Migration guidance from v5 lives in [`docs/migrations/v5-to-v6.md`](./docs/migrations/v5-to-v6.md).
 - Runnable usage patterns live in [`examples/`](./examples/), starting with [`examples/basic-counter.ts`](./examples/basic-counter.ts) and [`examples/command-palette.tsx`](./examples/command-palette.tsx).
 - Exact exported signatures and public API comments live in `dist/index.d.mts` and `dist/persist.d.mts` after `pnpm build`.

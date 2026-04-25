@@ -20,8 +20,6 @@ type TodoListEvents = {
   reset: void;
 };
 
-const todoListInitializers: Array<(this: TodoList) => void> = [];
-
 class TodoList extends SigmaTarget<TodoListEvents, TodoListState> {
   declare draft: string;
   declare todos: Todo[];
@@ -31,9 +29,6 @@ class TodoList extends SigmaTarget<TodoListEvents, TodoListState> {
       draft: "",
       todos: [],
     });
-    for (const initializer of todoListInitializers) {
-      initializer.call(this);
-    }
   }
 
   get completedCount() {
@@ -73,23 +68,13 @@ class TodoList extends SigmaTarget<TodoListEvents, TodoListState> {
   }
 }
 
-query(TodoList.prototype.canAddTodo, {
-  name: "canAddTodo",
-  addInitializer(initializer: (this: TodoList) => void) {
-    todoListInitializers.push(initializer);
-  },
-} as ClassMethodDecoratorContext<TodoList, TodoList["canAddTodo"]>);
-
-const counterInitializers: Array<(this: Counter) => void> = [];
+TodoList.prototype.canAddTodo = query(TodoList.prototype.canAddTodo);
 
 class Counter extends Sigma<{ count: number }> {
   declare count: number;
 
   constructor(count = 0) {
     super({ count });
-    for (const initializer of counterInitializers) {
-      initializer.call(this);
-    }
   }
 
   get doubled() {
@@ -110,12 +95,7 @@ class Counter extends Sigma<{ count: number }> {
   }
 }
 
-query(Counter.prototype.isEven, {
-  name: "isEven",
-  addInitializer(initializer: (this: Counter) => void) {
-    counterInitializers.push(initializer);
-  },
-} as ClassMethodDecoratorContext<Counter, Counter["isEven"]>);
+Counter.prototype.isEven = query(Counter.prototype.isEven);
 
 test("sigma classes expose readonly state, computeds, query decorators, and actions", () => {
   const todoList = new TodoList();
@@ -152,6 +132,37 @@ test("sigma classes expose readonly state, computeds, query decorators, and acti
   });
 
   stop();
+});
+
+test("subclasses initialize inherited actions and computeds before base instances exist", () => {
+  type BaseCounterState = {
+    count: number;
+  };
+
+  class BaseCounter extends Sigma<BaseCounterState> {
+    constructor() {
+      super({ count: 0 });
+    }
+
+    get doubled() {
+      return this.count * 2;
+    }
+
+    increment() {
+      this.count += 1;
+    }
+  }
+
+  interface BaseCounter extends BaseCounterState {}
+
+  class DerivedCounter extends BaseCounter {}
+
+  const counter = new DerivedCounter();
+
+  counter.increment();
+
+  assert.equal(counter.count, 1);
+  assert.equal(counter.doubled, 2);
 });
 
 test("sigma.getState returns committed public state", () => {
@@ -330,11 +341,14 @@ test("setup act callbacks must stay synchronous", () => {
   assert.equal(store.count, 0);
 });
 
-test("actions reuse one draft and can call queries, computeds, and other actions", () => {
+test("actions reuse one draft and read computeds and queries from committed state", () => {
   class ReentrantCounter extends Counter {
     incrementTwiceWithChecks() {
       this.increment();
       assert.equal(this.count, 1);
+      assert.equal(this.doubled, 0);
+      assert.equal(this.isEven(), true);
+      this.commit();
       assert.equal(this.doubled, 2);
       assert.equal(this.isEven(), false);
       this.increment();
@@ -348,6 +362,64 @@ test("actions reuse one draft and can call queries, computeds, and other actions
   assert.equal(counter.count, 2);
   assert.equal(counter.doubled, 4);
   assert.equal(counter.isEven(), true);
+});
+
+test("computeds and queries cannot call actions", () => {
+  class BadCounter extends Counter {
+    get invalidComputed() {
+      this.increment();
+      return this.count;
+    }
+
+    invalidQuery() {
+      this.increment();
+      return this.count;
+    }
+  }
+
+  BadCounter.prototype.invalidQuery = query(BadCounter.prototype.invalidQuery);
+
+  const counter = new BadCounter();
+
+  assert.throws(() => {
+    void counter.invalidComputed;
+  }, /Computeds and queries cannot call actions/);
+  assert.equal(counter.count, 0);
+  assert.throws(() => {
+    counter.invalidQuery();
+  }, /Computeds and queries cannot call actions/);
+  assert.equal(counter.count, 0);
+});
+
+test("actions cannot return active drafts", () => {
+  type InventoryState = {
+    items: string[];
+  };
+
+  class Inventory extends Sigma<InventoryState> {
+    declare items: string[];
+
+    constructor() {
+      super({ items: [] });
+    }
+
+    returnItems() {
+      return this.items;
+    }
+
+    add(item: string) {
+      this.items.push(item);
+    }
+  }
+
+  const inventory = new Inventory();
+
+  assert.throws(() => {
+    inventory.returnItems();
+  }, /returned an active draft/);
+  inventory.add("ok");
+
+  assert.deepEqual(inventory.items, ["ok"]);
 });
 
 test("commit publishes an explicit boundary inside sync actions", () => {

@@ -164,11 +164,10 @@ class CommandPalette extends SigmaTarget<CommandPaletteEvents, CommandPaletteSta
 interface CommandPalette extends CommandPaletteState {}
 
 export function CommandPaletteExample() {
-  const [instance] = useState(() => new CommandPalette());
-  const palette = useSigma(() => instance);
+  const palette = useSigma(() => new CommandPalette());
   const [lastRun, setLastRun] = useState<string>("Nothing yet");
 
-  useListener(instance, "ran", (command) => {
+  useListener(palette, "ran", (command) => {
     setLastRun(`${command.title} (${palette.usageCount(command.id)} runs)`);
   });
 
@@ -178,7 +177,7 @@ export function CommandPaletteExample() {
         Search
         <input
           value={palette.draft}
-          onInput={(event) => palette.setDraft((event.currentTarget as HTMLInputElement).value)}
+          onInput={(event) => palette.setDraft(event.currentTarget.value)}
           placeholder="Try: note, timer, inbox"
         />
       </label>

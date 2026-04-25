@@ -2,6 +2,7 @@ import type { Patch } from "immer";
 import { assertType, expectTypeOf, test } from "vitest";
 
 import {
+  castProtected,
   listen,
   query,
   setAutoFreeze,
@@ -68,12 +69,7 @@ test("sigma classes expose typed public state, computeds, queries, and actions",
   }
 
   const todoList = new TodoList();
-  assertType<void>(
-    query(TodoList.prototype.canAdd, {
-      name: "canAdd",
-      addInitializer() {},
-    } as unknown as ClassMethodDecoratorContext<TodoList, TodoList["canAdd"]>),
-  );
+  assertType<() => boolean>(query(TodoList.prototype.canAdd));
 
   assertType<string>(todoList.draft);
   assertType<Todo[]>(todoList.todos);
@@ -190,6 +186,16 @@ test("SigmaTarget infers typed events for listen and useListener", () => {
 
   assertType<void>(
     useListener(hub, "opened", (payload) => {
+      expectTypeOf(payload).toEqualTypeOf<{
+        id: string;
+      }>();
+    }),
+  );
+
+  const protectedHub = castProtected(hub);
+
+  assertType<void>(
+    useListener(protectedHub, "opened", (payload) => {
       expectTypeOf(payload).toEqualTypeOf<{
         id: string;
       }>();

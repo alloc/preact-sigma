@@ -29,7 +29,7 @@ Use the persist module when those primitives are the right boundary, but you do 
 
 ## Core Pieces
 
-- Store: owns `read`, `write`, and `remove` for persisted records.
+- Store: owns `get`, `set`, and `delete` for persisted records. These names match [Keyv](https://github.com/jaredwray/keyv) and `Map`.
 - Codec: owns payload shape, versioning, and migration logic between stored data and a full committed snapshot.
 - Pick options: persist selected top-level keys without writing a custom codec.
 - Helper: owns restore sequencing, subscription lifecycle, and write scheduling for one sigma instance.

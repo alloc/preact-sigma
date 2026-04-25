@@ -1,12 +1,19 @@
 import { type Cleanup } from "./internal/listener.js";
-import { listenersSymbol } from "./internal/symbols.js";
+import { listenersSymbol, typeSymbol } from "./internal/symbols.js";
 import { SigmaTarget } from "./sigma.js";
 
+/** Sigma targets and protected sigma target views that carry typed event metadata. */
+export type SigmaListenable<TEvents extends object = any> = {
+  readonly [typeSymbol]: {
+    readonly events: TEvents;
+  };
+};
+
 /** Target types supported by `listen(...)` and `useListener(...)`. */
-export type Listenable = SigmaTarget<any, any> | EventTarget;
+export type Listenable = SigmaListenable | EventTarget;
 
 type InferEventMap<TTarget extends Listenable> =
-  TTarget extends SigmaTarget<infer TEvents, any>
+  TTarget extends SigmaListenable<infer TEvents>
     ? TEvents
     : TTarget extends Window
       ? WindowEventMap
@@ -32,7 +39,7 @@ type InferListenerArgs<
   TEvent extends string,
 > = [
   (TEvent extends keyof TEvents ? TEvents[TEvent] : never) extends infer TPayload
-    ? TTarget extends SigmaTarget<any, any>
+    ? TTarget extends SigmaListenable<any>
       ? [TPayload] extends [never]
         ? never
         : [TPayload] extends [void]
@@ -69,8 +76,9 @@ export function listen(target: Listenable, name: string, listener: (...args: any
       target[listenersSymbol].removeListener(name, listener);
     };
   }
-  target.addEventListener(name, listener);
+  const eventTarget = target as EventTarget;
+  eventTarget.addEventListener(name, listener);
   return () => {
-    target.removeEventListener(name, listener);
+    eventTarget.removeEventListener(name, listener);
   };
 }

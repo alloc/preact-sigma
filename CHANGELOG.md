@@ -6,13 +6,17 @@ All notable changes to this project will be documented in this file.
 
 ### Breaking Changes
 
-- **Class-based models replace the `SigmaType` builder:** Define reusable state with `Sigma<TState>` and `SigmaTarget<TEvents, TState>` subclasses. State comes from `super(...)`, getters are computed reads, `@query` marks argument-based reads, and ordinary prototype methods are actions.
-- **Committed snapshots use `sigma.captureState(...)`:** The committed-state read helper is now `sigma.captureState(instance)`, paired with `sigma.replaceState(instance, nextState)`.
+- **Class-based models replace the `SigmaType` builder:** Models now extend `Sigma<TState>` or `SigmaTarget<TEvents, TState>`.
+- **Derived reads move to class members:** Computeds are class getters, argument-based reads use `@query`, and prototype methods are actions by default.
+- **Committed-state helpers changed:** Committed snapshots now use `sigma.captureState(...)`, paired with `sigma.replaceState(...)`.
+- **Protected views changed:** Use `castProtected(instance)` outside components and `useSigma(...)` inside components.
+- **Persistence helper names changed:** The `preact-sigma/persist` helpers now use restore, hydrate, persist, and pick naming.
 
 ### Added
 
-- **Default-state helper:** `mergeDefaults(...)` shallowly applies defined constructor overrides over a defaults object.
-- **Current persistence helper names:** `preact-sigma/persist` documents `restore(...)`, `restoreSync(...)`, `persist(...)`, `hydrate(...)`, `hydrateSync(...)`, and `pick` options for selected top-level state keys.
+- **Class model runtime:** `Sigma`, `SigmaTarget`, actions, computed getters, and `@query` support the v6 class API.
+- **Default-state helper:** `mergeDefaults(...)` applies constructor overrides over default state.
+- **Readonly consumer helpers:** `Protected<T>` and `castProtected(...)` expose the public readonly view used by `useSigma(...)`.
 
 ## v5.0.0
 

@@ -62,15 +62,15 @@ function createSyncStore<TStored>(initial?: Iterable<readonly [string, PersistRe
   const writes: Array<{ key: string; record: PersistRecord<TStored> }> = [];
 
   const store: SyncPersistStore<TStored> = {
-    read(key) {
+    get(key) {
       return records.get(key);
     },
-    write(key, record) {
+    set(key, record) {
       writes.push({ key, record });
-      records.set(key, record);
+      return records.set(key, record);
     },
-    remove(key) {
-      records.delete(key);
+    delete(key) {
+      return records.delete(key);
     },
   };
 
@@ -86,15 +86,15 @@ function createAsyncStore<TStored>(initial?: Iterable<readonly [string, PersistR
   const writes: Array<{ key: string; record: PersistRecord<TStored> }> = [];
 
   const store: PersistStore<TStored> = {
-    async read(key) {
+    async get(key) {
       return records.get(key);
     },
-    async write(key, record) {
+    async set(key, record) {
       writes.push({ key, record });
-      records.set(key, record);
+      return records.set(key, record);
     },
-    async remove(key) {
-      records.delete(key);
+    async delete(key) {
+      return records.delete(key);
     },
   };
 

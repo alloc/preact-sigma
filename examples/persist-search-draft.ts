@@ -38,14 +38,14 @@ const records = new Map<string, PersistRecord<Pick<SearchState, "draft">>>([
 ]);
 
 const store: SyncPersistStore<Pick<SearchState, "draft">> = {
-  read(key) {
+  get(key) {
     return records.get(key);
   },
-  write(key, record) {
-    records.set(key, record);
+  set(key, record) {
+    return records.set(key, record);
   },
-  remove(key) {
-    records.delete(key);
+  delete(key) {
+    return records.delete(key);
   },
 };
 

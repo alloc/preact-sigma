@@ -6,6 +6,7 @@ export {
   createDraft,
   finishDraft,
   freeze,
+  isDraft,
   isDraftable,
   original,
   Patch,

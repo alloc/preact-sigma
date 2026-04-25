@@ -22,12 +22,12 @@
 - Sigma class: a class that extends `Sigma<TState>` and passes its initial top-level state to `super(...)`. The `TState` argument drives helper typing for subscriptions, signals, and replacement snapshots; a same-named merged interface gives direct property reads their instance types.
 - Sigma target: a class that extends `SigmaTarget<TEvents, TState>` when it also emits typed events. Use `SigmaTarget<TEvents>` for event-only targets.
 - State property: a top-level key from `TState`. Each key becomes a reactive public property and has its own signal.
-- Computed: an argument-free derived getter on the class prototype.
-- Query: a reactive read method that accepts arguments and is marked with the `query` decorator.
-- Action: a prototype method that is not marked as a query. Actions read and write through sigma's draft and commit semantics.
+- Computed: an argument-free derived getter on the class prototype that reads committed state.
+- Query: a reactive read method that accepts arguments, is marked with the `query` decorator, and reads committed state.
+- Action: a prototype method that is not marked as a query. Actions read and write state properties through sigma's draft and commit semantics.
 - Setup handler: an optional `onSetup(...)` method that owns side effects and returns cleanup resources.
 - Event: a typed notification emitted with `this.emit(...)` inside an action and observed through `listen(...)` or `useListener(...)`.
-- Protected view: the readonly consumer view returned by `protect(...)` and `useSigma(...)`.
+- Protected view: the readonly consumer view returned by `castProtected(...)` and `useSigma(...)`.
 
 # Data Flow / Lifecycle
 
@@ -36,7 +36,7 @@
 3. Add getters for computed values, `@query` methods for argument-based reactive reads, and ordinary methods for actions.
 4. Instantiate the class. Constructor input can be merged with defaults before `super(...)` when instances need partial overrides.
 5. Read state, computeds, and queries reactively from the public instance.
-6. Mutate state inside actions. Synchronous actions publish automatically when they return, and sync nested actions on the same instance share one draft. Call `this.commit()` only when unpublished changes must cross a boundary, such as before an `await`, before the action promise resolves, before `emit(...)`, or before invoking another instance's action.
+6. Mutate state inside actions. Synchronous actions publish automatically when they return, and sync nested actions on the same instance share one draft. Computeds and queries still read the last committed state while an action has unpublished draft changes. Call `this.commit()` when derived reads or unpublished changes must cross a boundary, such as before an `await`, before the action promise resolves, before `emit(...)`, or before invoking another instance's action.
 7. Run `setup(...)` explicitly when the instance should start owning side effects. `useSigma(...)` does this automatically for component-owned instances that define `onSetup(...)`.
 8. Dispose the cleanup returned from `setup(...)` when the owned resources should stop.
 
@@ -53,6 +53,7 @@
 - Read one top-level state property as a `ReadonlySignal`: `sigma.getSignal(instance, key)`.
 - Own timers, listeners, subscriptions, or nested setup: `onSetup(...)` plus `setup(...)`.
 - Use a sigma instance inside a component: `useSigma(...)`.
+- Cast an instance to its readonly consumer view outside a component: `castProtected(instance)`.
 - Subscribe to sigma or DOM events in a component: `useListener(...)`.
 - Subscribe outside components: `listen(instance, ...)`.
 - Read or restore committed top-level state: `sigma.captureState(...)` and `sigma.replaceState(...)`.
@@ -63,6 +64,7 @@
 - Keep frequently read values as separate top-level state properties. Each top-level key gets its own signal.
 - Use getters for argument-free derived reads.
 - Use `@query` for tracked reads with arguments.
+- Derive directly from state properties inside an action when the calculation needs unpublished draft values.
 - Use ordinary actions for routine writes. Reserve `sigma.captureState(...)` and `sigma.replaceState(...)` for replay, reset, restore, or undo-like flows on committed top-level state.
 - Emit directly from actions that have no unpublished draft changes. After mutating state, publish first with `this.commit(); this.emit(...)`.
 - Prefer `listen(...)` for external event subscriptions. It works with sigma targets and DOM targets.
@@ -85,6 +87,7 @@
 - Crossing `emit(...)`, `await`, promise resolution, or another instance's action with unpublished changes. Publish them first with `this.commit()`.
 - Starting side effects during construction instead of through explicit `setup(...)`.
 - Encoding storage, hydration, or migration policy directly into model classes.
+- Relying on computeds or queries to observe unpublished draft changes inside actions.
 - Treating query calls as memoized across invocations.
 - Relying on patch payloads without enabling Immer patches first.
 
@@ -93,6 +96,7 @@
 - Sigma tracks top-level state properties. Each top-level key gets its own signal.
 - Protected consumer views expose immutable state and callable actions.
 - Published draftable public state is deep-frozen by default. `setAutoFreeze(false)` disables that behavior globally.
+- Computeds and queries read committed state, including when called inside actions.
 - Query calls are reactive at the call site but do not memoize across invocations.
 - Setup handlers return arrays of cleanup resources, and cleanup runs in reverse order.
 - Call Immer's `enablePatches()` before relying on `sigma.subscribe(instance, handler, { patches: true })`.
@@ -105,6 +109,8 @@
 - Calling `commit(...)` outside an action throws.
 - Calling `act(...)` outside an `onSetup(...)` setup context throws.
 - Calling `emit(...)` outside an action or before committing the active draft throws.
+- Calling an action from a computed or query throws.
+- Returning an active draft from an action throws.
 - `sigma.replaceState(...)` throws when the replacement value is not a plain object or when an action still owns unpublished changes.
 - Starting an action on another sigma instance while the current instance has an active action context throws.
 

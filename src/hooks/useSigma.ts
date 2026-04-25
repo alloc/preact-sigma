@@ -1,6 +1,6 @@
 import type { RefObject } from "preact";
 import { useEffect, useRef } from "preact/hooks";
-import type { Protected, Sigma } from "../sigma.js";
+import { castProtected, type Protected, type Sigma } from "../sigma.js";
 
 /** Setup arguments and recreation dependencies for `useSigma(...)`. */
 export type UseSigmaOptions<TSetup extends readonly any[] = any[]> = {
@@ -51,7 +51,7 @@ export function useSigma<T extends Sigma<any>>(
   optionsOrDeps?: Partial<UseSigmaOptions> | readonly any[],
 ) {
   // HACK: avoid useMemo so that HMR doesn't recreate the instance
-  const container = useRef<Protected<T> | null>(null);
+  const container = useRef<T | null>(null);
 
   let setup: Partial<UseSigmaOptions>["setup"];
   let deps: readonly any[] | undefined;
@@ -65,7 +65,7 @@ export function useSigma<T extends Sigma<any>>(
 
   if (!container.current || depsChanged(container, deps)) {
     depsCache.set(container, deps);
-    container.current = create().protect();
+    container.current = create();
   }
 
   const instance = container.current;
@@ -78,5 +78,5 @@ export function useSigma<T extends Sigma<any>>(
     }
   }, [instance, ...setupDeps]);
 
-  return instance;
+  return castProtected(instance);
 }
