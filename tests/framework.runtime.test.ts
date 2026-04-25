@@ -341,6 +341,58 @@ test("setup act callbacks must stay synchronous", () => {
   assert.equal(store.count, 0);
 });
 
+test("runtime guards reject unsupported action context operations", () => {
+  class EventCounter extends SigmaTarget<{ changed: number }, { count: number }> {
+    declare count: number;
+
+    constructor() {
+      super({ count: 0 });
+    }
+
+    emitBeforeCommit() {
+      this.count += 1;
+      this.emit("changed", this.count);
+    }
+
+    callActInsideSetupAction() {
+      this.act(function () {
+        this.act(function () {});
+      });
+    }
+
+    onSetup() {
+      this.callActInsideSetupAction();
+      return [];
+    }
+  }
+
+  const counter = new EventCounter();
+  const observed: number[] = [];
+  const stop = listen(counter, "changed", (count) => {
+    observed.push(count);
+  });
+
+  assert.throws(() => {
+    counter.count = 1;
+  }, /Cannot set state property "count" outside an action/);
+  assert.throws(() => {
+    counter.commit();
+  }, /Cannot commit\(\) from outside an action/);
+  assert.throws(() => {
+    counter.emit("changed", 1);
+  }, /Cannot emit\(\) from outside an action/);
+  assert.throws(() => {
+    counter.emitBeforeCommit();
+  }, /Cannot emit\(\) until you commit\(\) your draft/);
+  assert.throws(() => {
+    counter.setup();
+  }, /Cannot act\(\) from inside an action/);
+
+  assert.equal(counter.count, 0);
+  assert.deepEqual(observed, []);
+  stop();
+});
+
 test("private fields on sigma classes stay ordinary instance storage", async () => {
   const observed: Array<{ cached: number; count: number }> = [];
 
@@ -423,6 +475,43 @@ test("private fields on sigma classes stay ordinary instance storage", async () 
   stop();
 });
 
+test("private-field-only changes do not invalidate reactive reads", () => {
+  class CacheCounter extends Sigma<{ count: number }> {
+    declare count: number;
+    #cache = 0;
+
+    constructor() {
+      super({ count: 0 });
+    }
+
+    get displayedCount() {
+      return this.count + this.#cache;
+    }
+
+    bumpCache() {
+      this.#cache += 1;
+    }
+
+    increment() {
+      this.count += 1;
+    }
+  }
+
+  const counter = new CacheCounter();
+  const displayedCount = computed(() => counter.displayedCount);
+
+  assert.equal(displayedCount.value, 0);
+
+  counter.bumpCache();
+
+  assert.equal(counter.displayedCount, 0);
+  assert.equal(displayedCount.value, 0);
+
+  counter.increment();
+
+  assert.equal(displayedCount.value, 2);
+});
+
 test("actions reuse one draft and read computeds and queries from committed state", () => {
   class ReentrantCounter extends Counter {
     incrementTwiceWithChecks() {
@@ -471,6 +560,30 @@ test("external action errors include the active draft owner", () => {
   }, /Draft for SourceCounter was not committed before an external action was invoked/);
   assert.equal(source.count, 0);
   assert.equal(target.count, 0);
+});
+
+test("query calls are reactive but not memoized across invocations", () => {
+  class CountingQuery extends Counter {
+    calls = 0;
+
+    total(offset: number) {
+      this.calls += 1;
+      return this.count + offset;
+    }
+  }
+
+  CountingQuery.prototype.total = query(CountingQuery.prototype.total);
+
+  const counter = new CountingQuery();
+
+  assert.equal(counter.total(1), 1);
+  assert.equal(counter.total(1), 1);
+  assert.equal(counter.calls, 2);
+
+  counter.increment();
+
+  assert.equal(counter.total(1), 2);
+  assert.equal(counter.calls, 3);
 });
 
 test("computeds and queries cannot call actions", () => {
@@ -593,6 +706,34 @@ test("async actions can commit after await", async () => {
   assert.equal(counter.count, 1);
   assert.deepEqual(observed, [1]);
   stop();
+});
+
+test("rejected async actions clear unpublished draft state", async () => {
+  class RejectingCounter extends Counter {
+    async rejectAfterDraft() {
+      await Promise.resolve();
+      this.count += 1;
+      throw new Error("boom");
+    }
+  }
+
+  const counter = new RejectingCounter();
+
+  await counter.rejectAfterDraft().then(
+    () => {
+      assert.fail("expected action to reject");
+    },
+    (error) => {
+      assert.instanceOf(error, Error);
+      assert.equal(error.message, "boom");
+    },
+  );
+
+  assert.equal(counter.count, 0);
+
+  counter.increment();
+
+  assert.equal(counter.count, 1);
 });
 
 test("sigma.replaceState restores committed state and notifies subscribers", () => {
