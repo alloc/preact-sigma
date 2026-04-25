@@ -18,6 +18,7 @@ All notable changes to this project will be documented in this file.
 - **Default-state helper:** `mergeDefaults(...)` applies constructor overrides over default state.
 - **Private class fields:** Class models support ECMAScript `#fields` for ephemeral instance storage that is not signal-backed, captured, or persisted by sigma.
 - **Readonly consumer helpers:** `Protected<T>` and `castProtected(...)` expose the public readonly view used by `useSigma(...)`.
+- **Standalone sigma targets:** Directly constructed `SigmaTarget<TEvents>` instances can emit typed events from ordinary code.
 
 ### Internal Improvements
 

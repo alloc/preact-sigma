@@ -20,14 +20,14 @@
 # Core Abstractions
 
 - Sigma class: a class that extends `Sigma<TState>` and passes its initial top-level state to `super(...)`. The `TState` argument drives helper typing for subscriptions, signals, and replacement snapshots; a same-named merged interface gives direct property reads their instance types.
-- Sigma target: a class that extends `SigmaTarget<TEvents, TState>` when it also emits typed events. Use `SigmaTarget<TEvents>` for event-only targets.
+- Sigma target: a class that extends `SigmaTarget<TEvents>` for typed event actions or `SigmaTarget<TEvents, TState>` when it also owns state. Use `new SigmaTarget<TEvents>()` for standalone event-only targets.
 - State property: a top-level key from `TState`. Each key becomes a reactive public property and has its own signal.
 - Private field: an ECMAScript `#field` on the model class. Private fields are ordinary instance storage. They can be read from model members, but they do not create signals or invalidate reactive reads by themselves.
 - Computed: an argument-free derived getter on the class prototype that reads committed state.
 - Query: a reactive read method that accepts arguments, is marked with the `query` decorator, and reads committed state.
 - Action: a prototype method that is not marked as a query. Actions read and write state properties through sigma's draft and commit semantics.
 - Setup handler: an optional `onSetup(...)` method that owns side effects and returns cleanup resources.
-- Event: a typed notification emitted with `this.emit(...)` inside an action and observed through `listen(...)` or `useListener(...)`.
+- Event: a typed notification emitted with `this.emit(...)` inside an action, or with `emit(...)` on a directly constructed `SigmaTarget`, and observed through `listen(...)` or `useListener(...)`.
 - Protected view: the readonly consumer view returned by `castProtected(...)` and `useSigma(...)`.
 
 # Data Flow / Lifecycle
@@ -45,6 +45,7 @@
 
 - Define reusable model state: `class Model extends Sigma<TState>`.
 - Define reusable model state with events: `class Model extends SigmaTarget<TEvents, TState>`.
+- Define a standalone typed event target: `new SigmaTarget<TEvents>()`.
 - Merge partial constructor input with defaults: `mergeDefaults(initial, defaults)`.
 - Derive an argument-free value: a class getter.
 - Derive a reactive read with arguments: an `@query` class method.
@@ -68,7 +69,7 @@
 - Use `@query` for tracked reads with arguments.
 - Derive directly from state properties inside an action when the calculation needs unpublished draft values.
 - Use ordinary actions for routine writes. Reserve `sigma.captureState(...)` and `sigma.replaceState(...)` for replay, reset, restore, or undo-like flows on committed top-level state.
-- Emit directly from actions that have no unpublished draft changes. After mutating state, publish first with `this.commit(); this.emit(...)`.
+- Emit directly from standalone `SigmaTarget` instances. In subclasses, emit from actions that have no unpublished draft changes. After mutating state, publish first with `this.commit(); this.emit(...)`.
 - Prefer `listen(...)` for external event subscriptions. It works with sigma targets and DOM targets.
 - Put owned side effects in `onSetup(...)`.
 - Use `sigma.subscribe(this, ...)` inside `onSetup(...)` when a setup-owned side effect should react to future committed publishes. Return that cleanup so the subscription stops with setup.
@@ -104,14 +105,14 @@
 - Setup handlers return arrays of cleanup resources, and cleanup runs in reverse order.
 - Call Immer's `enablePatches()` before relying on `sigma.subscribe(instance, handler, { patches: true })`.
 - `sigma.replaceState(...)` works on committed top-level state and requires a plain object snapshot.
-- `SigmaTarget.emit(...)` runs from an action and requires no active unpublished draft. It does not need a `commit(...)` callback.
+- `SigmaTarget.emit(...)` runs directly on standalone targets. In subclasses, it runs from an action and requires no active unpublished draft.
 
 # Error Model
 
 - Crossing an action boundary with unpublished changes throws until `this.commit()` publishes them. Async actions also reject when they finish with unpublished changes.
 - Calling `commit(...)` outside an action throws.
 - Calling `act(...)` outside an `onSetup(...)` setup context throws.
-- Calling `emit(...)` outside an action or before committing the active draft throws.
+- Calling `emit(...)` outside an action on a subclass, or before committing the active draft, throws.
 - Calling an action from a computed or query throws.
 - Returning an active draft from an action throws.
 - `sigma.replaceState(...)` throws when the replacement value is not a plain object or when an action still owns unpublished changes.

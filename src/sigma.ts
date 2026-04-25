@@ -580,13 +580,24 @@ export class SigmaTarget<
     super(state ?? emptySentinel);
   }
 
-  /** Emits a typed event from an action after unpublished draft changes are committed. */
+  /**
+   * Emits a typed event.
+   *
+   * Directly constructed targets can emit from ordinary code. Subclasses emit from action context
+   * after unpublished draft changes are committed.
+   */
   emit<TEvent extends string & keyof TEvents>(
     name: TEvent,
     ...[detail]: EventParameters<TEvents[TEvent]>
   ) {
     const instance = getActionInstance(this);
-    assertActionContext(instance, "Cannot emit() from outside an action.");
+    if (Object.getPrototypeOf(instance) === SigmaTarget.prototype) {
+      if (activeDraft) {
+        throw createExternalActionError();
+      }
+    } else {
+      assertActionContext(instance, "Cannot emit() from outside an action.");
+    }
     if (instance === activeDraftInstance && activeDraft) {
       throw new Error("Cannot emit() until you commit() your draft.");
     }

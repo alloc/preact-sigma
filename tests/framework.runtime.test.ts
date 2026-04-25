@@ -225,6 +225,43 @@ test("listen unwraps sigma event payloads and supports void events", () => {
   assert.deepEqual(observed, ["added:Ship v6", "reset"]);
 });
 
+test("direct SigmaTarget instances emit outside actions", () => {
+  const target = new SigmaTarget<{ changed: number; reset: void }>();
+  const observed: string[] = [];
+  const stopChanged = listen(target, "changed", (count) => {
+    observed.push(`changed:${count}`);
+  });
+  const stopReset = listen(target, "reset", () => {
+    observed.push("reset");
+  });
+
+  target.emit("changed", 1);
+  target.emit("reset");
+  stopChanged();
+  stopReset();
+  target.emit("changed", 2);
+
+  assert.deepEqual(observed, ["changed:1", "reset"]);
+});
+
+test("direct SigmaTarget emit preserves unpublished draft boundaries", () => {
+  const target = new SigmaTarget<{ changed: number }>();
+
+  class SourceCounter extends Counter {
+    notifyBeforeCommit() {
+      this.count += 1;
+      target.emit("changed", this.count);
+    }
+  }
+
+  const source = new SourceCounter();
+
+  assert.throws(() => {
+    source.notifyBeforeCommit();
+  }, /Draft for SourceCounter was not committed before an external action was invoked/);
+  assert.equal(source.count, 0);
+});
+
 test("setup returns a cleanup that owns resources in reverse order", () => {
   const observedEvents: string[] = [];
   const target = new EventTarget();

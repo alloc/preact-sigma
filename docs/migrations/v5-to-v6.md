@@ -116,7 +116,7 @@ interface TodoList extends TodoListState {}
 
 ## Events
 
-`SigmaTarget` now takes event types first. Use `SigmaTarget<TEvents>` for event-only targets and `SigmaTarget<TEvents, TState>` for targets that also own state.
+`SigmaTarget` now takes event types first. Use `new SigmaTarget<TEvents>()` for standalone event-only targets, `class Model extends SigmaTarget<TEvents>` for event-only action classes, and `SigmaTarget<TEvents, TState>` for class targets that also own state.
 
 ```ts
 import { listen, SigmaTarget } from "preact-sigma";
@@ -140,7 +140,7 @@ const stop = listen(notifications, "saved", ({ id }) => {
 });
 ```
 
-`emit(...)` runs inside actions. If an action mutates state before emitting, publish first with `this.commit()`.
+Directly constructed `SigmaTarget` instances can emit from ordinary code. Subclasses emit inside actions. If an action mutates state before emitting, publish first with `this.commit()`.
 
 ## Commit Boundaries
 

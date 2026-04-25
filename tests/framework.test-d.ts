@@ -162,6 +162,20 @@ test("sigma classes expose typed public state, computeds, queries, and actions",
 });
 
 test("SigmaTarget infers typed events for listen and useListener", () => {
+  const directHub = new SigmaTarget<{
+    opened: {
+      id: string;
+    };
+    closed: void;
+  }>();
+
+  assertType<void>(
+    directHub.emit("opened", {
+      id: "a",
+    }),
+  );
+  assertType<void>(directHub.emit("closed"));
+
   const hub = new (class Hub extends SigmaTarget<{
     opened: {
       id: string;
