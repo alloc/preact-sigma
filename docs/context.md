@@ -22,6 +22,7 @@
 - Sigma class: a class that extends `Sigma<TState>` and passes its initial top-level state to `super(...)`. The `TState` argument drives helper typing for subscriptions, signals, and replacement snapshots; a same-named merged interface gives direct property reads their instance types.
 - Sigma target: a class that extends `SigmaTarget<TEvents, TState>` when it also emits typed events. Use `SigmaTarget<TEvents>` for event-only targets.
 - State property: a top-level key from `TState`. Each key becomes a reactive public property and has its own signal.
+- Private field: an ECMAScript `#field` on the model class. Private fields are ordinary instance storage, not signal-backed state.
 - Computed: an argument-free derived getter on the class prototype that reads committed state.
 - Query: a reactive read method that accepts arguments, is marked with the `query` decorator, and reads committed state.
 - Action: a prototype method that is not marked as a query. Actions read and write state properties through sigma's draft and commit semantics.
@@ -62,6 +63,7 @@
 
 - Put the state shape in a named `State` type, pass it to `Sigma<TState>` or `SigmaTarget<TEvents, TState>`, then merge a same-named interface with the class for direct property typing.
 - Keep frequently read values as separate top-level state properties. Each top-level key gets its own signal.
+- Use private fields for ephemeral caches, handles, or bookkeeping that should not be captured, restored, persisted, or used as subscription keys.
 - Use getters for argument-free derived reads.
 - Use `@query` for tracked reads with arguments.
 - Derive directly from state properties inside an action when the calculation needs unpublished draft values.
@@ -94,6 +96,7 @@
 # Invariants and Constraints
 
 - Sigma tracks top-level state properties. Each top-level key gets its own signal.
+- Private fields are not top-level state properties. They do not create signals, appear in committed snapshots, participate in persistence helpers, or drive subscriptions by themselves.
 - Protected consumer views expose immutable state and callable actions.
 - Published draftable public state is deep-frozen by default. `setAutoFreeze(false)` disables that behavior globally.
 - Computeds and queries read committed state, including when called inside actions.

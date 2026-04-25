@@ -165,16 +165,16 @@ test("subclasses initialize inherited actions and computeds before base instance
   assert.equal(counter.doubled, 2);
 });
 
-test("sigma.getState returns committed public state", () => {
+test("sigma.captureState returns committed public state", () => {
   const counter = new Counter(1);
 
-  assert.deepEqual(sigma.getState(counter), { count: 1 });
+  assert.deepEqual(sigma.captureState(counter), { count: 1 });
   assert.equal(sigma.getSignal(counter, "count").value, 1);
   assert.equal(counter.doubled, 2);
 
   counter.increment();
 
-  assert.deepEqual(sigma.getState(counter), { count: 2 });
+  assert.deepEqual(sigma.captureState(counter), { count: 2 });
   assert.equal(counter.doubled, 4);
 });
 
@@ -341,6 +341,88 @@ test("setup act callbacks must stay synchronous", () => {
   assert.equal(store.count, 0);
 });
 
+test("private fields on sigma classes stay ordinary instance storage", async () => {
+  const observed: Array<{ cached: number; count: number }> = [];
+
+  class PrivateCounter extends SigmaTarget<
+    { changed: { cached: number; count: number } },
+    { count: number }
+  > {
+    declare count: number;
+    #cache = new Map<string, number>();
+
+    constructor() {
+      super({ count: 0 });
+    }
+
+    #cachedCount() {
+      return this.#cache.get("count") ?? 0;
+    }
+
+    get displayCount() {
+      return this.count + this.#cachedCount();
+    }
+
+    cachedTotal(offset: number) {
+      return this.count + this.#cachedCount() + offset;
+    }
+
+    cacheSnapshot() {
+      return {
+        act: this.#cache.get("act") ?? 0,
+        count: this.#cache.get("count") ?? 0,
+        setup: this.#cache.get("setup") ?? 0,
+      };
+    }
+
+    increment() {
+      this.#cache.set("count", this.#cachedCount() + 1);
+      this.count += 1;
+      this.commit();
+      this.emit("changed", { cached: this.#cachedCount(), count: this.count });
+    }
+
+    async incrementLater() {
+      await Promise.resolve();
+      this.#cache.set("count", this.#cachedCount() + 1);
+      this.count += 1;
+      this.commit();
+    }
+
+    onSetup() {
+      this.#cache.set("setup", 1);
+      this.act(function () {
+        this.#cache.set("act", 1);
+        this.count += 1;
+      });
+      return [];
+    }
+  }
+
+  PrivateCounter.prototype.cachedTotal = query(PrivateCounter.prototype.cachedTotal);
+
+  const counter = new PrivateCounter();
+  const stop = listen(counter, "changed", (event) => {
+    observed.push(event);
+  });
+
+  counter.setup();
+  counter.increment();
+  await counter.incrementLater();
+
+  assert.equal(counter.count, 3);
+  assert.equal(counter.displayCount, 5);
+  assert.equal(counter.cachedTotal(5), 10);
+  assert.deepEqual(counter.cacheSnapshot(), { act: 1, count: 2, setup: 1 });
+  assert.deepEqual(sigma.captureState(counter), { count: 3 });
+  assert.deepEqual(observed, [{ cached: 1, count: 2 }]);
+  assert.throws(() => {
+    sigma.subscribe(counter, "#cache" as never, () => {});
+  }, /not signal-backed/);
+
+  stop();
+});
+
 test("actions reuse one draft and read computeds and queries from committed state", () => {
   class ReentrantCounter extends Counter {
     incrementTwiceWithChecks() {
@@ -362,6 +444,33 @@ test("actions reuse one draft and read computeds and queries from committed stat
   assert.equal(counter.count, 2);
   assert.equal(counter.doubled, 4);
   assert.equal(counter.isEven(), true);
+});
+
+test("external action errors include the active draft owner", () => {
+  class ExternalCounter extends Counter {}
+
+  class SourceCounter extends Counter {
+    #target: ExternalCounter;
+
+    constructor(target: ExternalCounter) {
+      super();
+      this.#target = target;
+    }
+
+    invokeExternalAction() {
+      this.count += 1;
+      this.#target.increment();
+    }
+  }
+
+  const target = new ExternalCounter();
+  const source = new SourceCounter(target);
+
+  assert.throws(() => {
+    source.invokeExternalAction();
+  }, /Draft for SourceCounter was not committed before an external action was invoked/);
+  assert.equal(source.count, 0);
+  assert.equal(target.count, 0);
 });
 
 test("computeds and queries cannot call actions", () => {
@@ -507,7 +616,7 @@ test("sigma.replaceState restores committed state and notifies subscribers", () 
     },
     { patches: true },
   );
-  const initial = sigma.getState(counter);
+  const initial = sigma.captureState(counter);
 
   counter.increment();
   sigma.replaceState(counter, initial);
@@ -535,13 +644,13 @@ test("sigma.replaceState is a no-op for the current committed snapshot", () => {
   const stop = sigma.subscribe(counter, (nextState) => {
     observed.push(nextState.count);
   });
-  const initial = sigma.getState(counter);
+  const initial = sigma.captureState(counter);
 
   sigma.replaceState(counter, initial);
   assert.deepEqual(observed, []);
 
   counter.increment();
-  const changed = sigma.getState(counter);
+  const changed = sigma.captureState(counter);
   sigma.replaceState(counter, changed);
 
   assert.equal(counter.count, 1);
@@ -571,7 +680,7 @@ test("sigma.replaceState throws while an async action has unpublished changes", 
   await Promise.resolve();
 
   assert.throws(() => {
-    sigma.replaceState(counter, sigma.getState(counter));
+    sigma.replaceState(counter, sigma.captureState(counter));
   }, /replaceState\(\) cannot run while an action has unpublished changes/);
 
   release();

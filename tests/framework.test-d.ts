@@ -77,8 +77,8 @@ test("sigma classes expose typed public state, computeds, queries, and actions",
   assertType<boolean>(todoList.canAdd());
   assertType<void>(todoList.setDraft("next"));
   assertType<string>(sigma.getSignal(todoList, "draft").value);
-  assertType<string>(sigma.getState(todoList).draft);
-  assertType<readonly Todo[]>(sigma.getState(todoList).todos);
+  assertType<string>(sigma.captureState(todoList).draft);
+  assertType<readonly Todo[]>(sigma.captureState(todoList).todos);
   assertType<() => void>(
     sigma.subscribe(todoList, function (nextState, baseState) {
       assertType<string>(nextState.draft);
@@ -90,7 +90,7 @@ test("sigma classes expose typed public state, computeds, queries, and actions",
       assertType<string>(draft);
     }),
   );
-  assertType<void>(sigma.replaceState(todoList, sigma.getState(todoList)));
+  assertType<void>(sigma.replaceState(todoList, sigma.captureState(todoList)));
   sigma.replaceState(todoList, {
     draft: "ready",
     todos: [],

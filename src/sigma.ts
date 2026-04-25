@@ -58,24 +58,80 @@ export type SigmaState<T extends SigmaDefinition> = Sigma<T["state"]> & {
   [typeSymbol]: T;
 };
 
-let activeInstance: Sigma<any> | null = null;
+let activeActionInstance: Sigma<any> | null = null;
+let activeDraftInstance: Sigma<any> | null = null;
 let activeDraft: any;
 let activeDerivedReadDepth = 0;
+let activeSetupInstance: Sigma<any> | null = null;
+const pendingAsyncActions = new WeakMap<Sigma<any>, number>();
 
-function ensureActiveInstance(instance: Sigma<any>) {
-  if (!activeInstance) {
-    activeInstance = instance;
+function hasPendingAsyncAction(instance: Sigma<any>) {
+  return pendingAsyncActions.has(instance);
+}
+
+function addPendingAsyncAction(instance: Sigma<any>) {
+  pendingAsyncActions.set(instance, (pendingAsyncActions.get(instance) ?? 0) + 1);
+}
+
+function removePendingAsyncAction(instance: Sigma<any>) {
+  const count = pendingAsyncActions.get(instance);
+  if (!count) {
+    return;
+  }
+  if (count === 1) {
+    pendingAsyncActions.delete(instance);
+  } else {
+    pendingAsyncActions.set(instance, count - 1);
+  }
+}
+
+function hasActionContext(instance: Sigma<any>) {
+  if (activeActionInstance) {
+    return activeActionInstance === instance;
+  }
+  return hasPendingAsyncAction(instance);
+}
+
+function createExternalActionError() {
+  const instance = activeDraftInstance ?? activeActionInstance;
+  const constructorName = instance?.constructor.name;
+  const owner = constructorName ? `Draft for ${constructorName}` : "Draft";
+  return new Error(`[preact-sigma] ${owner} was not committed before an external action was invoked.`);
+}
+
+function beginActionContext(instance: Sigma<any>) {
+  if (!activeActionInstance) {
+    if (activeDraftInstance && activeDraftInstance !== instance) {
+      throw createExternalActionError();
+    }
+    activeActionInstance = instance;
     return false;
   }
-  if (instance !== activeInstance) {
-    throw new Error("Draft was not committed before an external action was invoked.");
+  if (instance !== activeActionInstance) {
+    throw createExternalActionError();
   }
   return true;
 }
 
-function clearActiveInstance() {
-  activeInstance = null;
+function endActionContext(instance: Sigma<any>) {
+  if (activeActionInstance === instance) {
+    activeActionInstance = null;
+  }
+}
+
+function clearActiveAction() {
+  activeActionInstance = null;
+  activeDraftInstance = null;
   activeDraft = null;
+}
+
+function assertActionContext(instance: Sigma<any>, message: string) {
+  if (activeActionInstance && activeActionInstance !== instance) {
+    throw createExternalActionError();
+  }
+  if (!hasActionContext(instance)) {
+    throw new Error(message);
+  }
 }
 
 function isStateKey(instance: Sigma<any>, key: string): boolean {
@@ -93,7 +149,7 @@ function createSnapshot(instance: Sigma<any>) {
   const state: Record<string, unknown> = {};
   for (const key in instance) {
     if (isStateKey(instance, key)) {
-      state[key] = (instance as any)[key];
+      state[key] = getStateSignal(instance, key)!.value;
     }
   }
   return state;
@@ -101,6 +157,36 @@ function createSnapshot(instance: Sigma<any>) {
 
 function createDraft<TState extends object>(instance: Sigma<TState>): immer.Draft<TState> {
   return immer.createDraft(createSnapshot(instance)) as any;
+}
+
+function ensureDraft(instance: Sigma<any>) {
+  if (activeDraftInstance && activeDraftInstance !== instance) {
+    throw createExternalActionError();
+  }
+  activeDraftInstance = instance;
+  activeDraft ??= createDraft(instance);
+  return activeDraft;
+}
+
+function readStateProperty(instance: Sigma<any>, key: string) {
+  const signal = getStateSignal(instance, key)!;
+  if (!activeDerivedReadDepth && hasActionContext(instance)) {
+    if (activeDraftInstance === instance) {
+      return activeDraft[key];
+    }
+    if (immer.isDraftable(signal.value)) {
+      return ensureDraft(instance)[key];
+    }
+  }
+  return signal.value;
+}
+
+function writeStateProperty(instance: Sigma<any>, key: string, value: unknown) {
+  assertActionContext(
+    instance,
+    `[preact-sigma] Cannot set state property "${key}" outside an action.`,
+  );
+  ensureDraft(instance)[key] = value;
 }
 
 function runDerivedRead<T>(callback: () => T): T {
@@ -168,54 +254,22 @@ function publishState(
   });
 }
 
-function createActionContext<TState extends object>(instance: Sigma<TState>) {
-  return new Proxy(instance, {
-    get(target, key, receiver) {
-      if (typeof key === "string" && isStateKey(target, key)) {
-        if (activeDraft) {
-          ensureActiveInstance(target);
-          return activeDraft[key];
-        }
-        const { value } = getStateSignal(target, key)!;
-        if (immer.isDraftable(value)) {
-          activeDraft = createDraft(instance);
-          return activeDraft[key];
-        }
-        return value;
-      }
-      if (key === instanceSymbol) {
-        return instance;
-      }
-      return Reflect.get(target, key, receiver);
-    },
-    set(target, key, value) {
-      if (typeof key === "string" && isStateKey(target, key)) {
-        ensureActiveInstance(instance);
-        activeDraft ??= createDraft(instance);
-        activeDraft[key] = value;
-        return true;
-      }
-      return Reflect.set(target, key, value);
-    },
-  });
-}
-
 function getActionInstance(context: object) {
   return (context as { [instanceSymbol]: Sigma<any> })[instanceSymbol];
 }
 
-function ensureDraftCommitted(instance: Sigma<any>) {
-  if (activeInstance && instance !== activeInstance) {
-    throw new Error("Draft was not committed before an external action was invoked.");
+function commitDraft(instance: Sigma<any>) {
+  if (activeDraftInstance && instance !== activeDraftInstance) {
+    throw createExternalActionError();
   }
 
-  activeInstance = null;
   if (!activeDraft) {
     return false;
   }
 
   const draft = activeDraft;
   activeDraft = null;
+  activeDraftInstance = null;
 
   let patches: immer.Patch[] | undefined;
   let inversePatches: immer.Patch[] | undefined;
@@ -237,6 +291,45 @@ function ensureDraftCommitted(instance: Sigma<any>) {
   }
 
   return changed;
+}
+
+function hasStateChanges(baseState: Record<string, unknown>, nextState: Record<string, unknown>) {
+  const baseKeys = Object.keys(baseState);
+  const nextKeys = Object.keys(nextState);
+  if (baseKeys.length !== nextKeys.length) {
+    return true;
+  }
+  for (const key of nextKeys) {
+    if (!Object.hasOwn(baseState, key) || !Object.is(baseState[key], nextState[key])) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function createReplacementPatches(
+  baseState: Record<string, unknown>,
+  nextState: Record<string, unknown>,
+) {
+  let patches: immer.Patch[] | undefined;
+  let inversePatches: immer.Patch[] | undefined;
+  const draft = immer.createDraft(baseState) as Record<string, unknown>;
+  const missingKeys = new Set(Object.keys(baseState));
+
+  for (const key in nextState) {
+    draft[key] = nextState[key];
+    missingKeys.delete(key);
+  }
+  for (const key of missingKeys) {
+    delete draft[key];
+  }
+
+  immer.finishDraft(draft, (nextPatches, nextInversePatches) => {
+    patches = nextPatches;
+    inversePatches = nextInversePatches;
+  });
+
+  return { inversePatches, patches };
 }
 
 function initializePrototype(prototype: object) {
@@ -269,44 +362,65 @@ function initializePrototype(prototype: object) {
         }
 
         const instance = getActionInstance(this);
-        const actionExisted = ensureActiveInstance(instance);
+        const actionExisted = beginActionContext(instance);
         if (actionExisted) {
-          const result = value.apply(this, args);
+          const result = value.apply(instance, args);
           assertActionResult(key, result);
           return result;
         }
 
         let result;
         try {
-          const actionContext = createActionContext(instance);
-          result = actionFn.apply(actionContext, args);
+          result = actionFn.apply(instance, args);
           assertActionResult(key, result);
         } catch (error) {
-          clearActiveInstance();
+          clearActiveAction();
           throw error;
         }
 
-        const changed = ensureDraftCommitted(instance);
+        let changed;
+        try {
+          changed = commitDraft(instance);
+        } catch (error) {
+          clearActiveAction();
+          throw error;
+        }
         if (isPromiseLike(result)) {
           if (changed) {
+            endActionContext(instance);
             throw new Error(
               `[preact-sigma] Action named "${key}" forgot to commit() its draft before returning a promise.`,
             );
           }
+          addPendingAsyncAction(instance);
+          endActionContext(instance);
           const onResolveAsyncAction = (promiseResult: any) => {
-            if (activeDraft && instance === activeInstance) {
-              const changed = ensureDraftCommitted(instance);
-              if (changed) {
-                throw new Error(
-                  `[preact-sigma] Action named "${key}" forgot to commit() its draft before its promise resolved.`,
-                );
+            try {
+              if (activeDraft && instance === activeDraftInstance) {
+                const changed = commitDraft(instance);
+                if (changed) {
+                  throw new Error(
+                    `[preact-sigma] Action named "${key}" forgot to commit() its draft before its promise resolved.`,
+                  );
+                }
               }
+              return promiseResult;
+            } finally {
+              removePendingAsyncAction(instance);
             }
-            return promiseResult;
           };
-          return result.then(onResolveAsyncAction);
+          const onRejectAsyncAction = (error: unknown) => {
+            if (activeDraftInstance === instance) {
+              activeDraft = null;
+              activeDraftInstance = null;
+            }
+            removePendingAsyncAction(instance);
+            throw error;
+          };
+          return result.then(onResolveAsyncAction, onRejectAsyncAction);
         }
 
+        endActionContext(instance);
         return result;
       };
     }
@@ -338,25 +452,6 @@ function disposeCleanupResource(resource: AnyResource) {
   }
 }
 
-function act(this: Sigma<any>, fn: (this: any) => void) {
-  const instance = getActionInstance(this);
-  if (instance !== this) {
-    throw new Error("Cannot act() from inside an action.");
-  }
-  ensureActiveInstance(instance);
-  try {
-    const context = createActionContext(instance);
-    const result = action(fn).call(context);
-    if (isPromiseLike(result)) {
-      throw new Error("[preact-sigma] act() callbacks must be synchronous");
-    }
-  } catch (error) {
-    clearActiveInstance();
-    throw error;
-  }
-  ensureDraftCommitted(instance);
-}
-
 function defineSignalProperty(instance: Sigma<any>, key: string, value: any) {
   Object.defineProperty(instance, key + signalSuffix, {
     value: createSignal(value),
@@ -364,7 +459,10 @@ function defineSignalProperty(instance: Sigma<any>, key: string, value: any) {
   if (!Object.hasOwn(instance.constructor.prototype, key)) {
     Object.defineProperty(instance.constructor.prototype, key, {
       get() {
-        return this[key + signalSuffix].value;
+        return readStateProperty(this, key);
+      },
+      set(value) {
+        writeStateProperty(this, key, value);
       },
       enumerable: true,
     });
@@ -375,6 +473,7 @@ function defineSignalProperty(instance: Sigma<any>, key: string, value: any) {
  * Base class for signal-backed state models.
  *
  * `TState` is the source of typing for top-level state keys, subscriptions, signals, and replacement snapshots.
+ * Private class fields stay ordinary instance storage and are not signal-backed, captured, or persisted.
  * Merge a same-named interface with the class when direct property reads should be typed on the instance.
  */
 export abstract class Sigma<TState extends object> {
@@ -404,18 +503,15 @@ export abstract class Sigma<TState extends object> {
 
   /** Runs `onSetup(...)` and returns a cleanup that disposes returned resources in reverse order. */
   setup(...args: Parameters<Extract<this["onSetup"], AnyFunction>>) {
-    const setupContext = new Proxy(this, {
-      get(target, key, receiver) {
-        if (key === instanceSymbol) {
-          return target;
-        }
-        if (key === "act") {
-          return act.bind(target);
-        }
-        return Reflect.get(target, key, receiver);
-      },
-    });
-    const resources = this.onSetup!.apply(setupContext, args);
+    const instance = getActionInstance(this);
+    const previousSetupInstance = activeSetupInstance;
+    activeSetupInstance = instance;
+    let resources: readonly AnyResource[];
+    try {
+      resources = this.onSetup!.apply(instance, args);
+    } finally {
+      activeSetupInstance = previousSetupInstance;
+    }
     return () => {
       for (let i = resources.length - 1; i >= 0; i--) {
         disposeCleanupResource(resources[i]);
@@ -431,27 +527,34 @@ export abstract class Sigma<TState extends object> {
    */
   commit<T = void>(callback?: (this: typeof this) => T) {
     const instance = getActionInstance(this);
-    if (instance === this) {
-      throw new Error("Cannot commit() from outside an action.");
-    }
-    ensureDraftCommitted(instance);
+    assertActionContext(instance, "Cannot commit() from outside an action.");
+    commitDraft(instance);
     if (callback) {
-      const context = new Proxy(instance, {
-        get(target, key, receiver) {
-          if (key === instanceSymbol) {
-            return instance;
-          }
-          return Reflect.get(target, key, receiver);
-        },
-      });
-      return callback.call(context as this);
+      return callback.call(instance as this);
     }
   }
 
   /** Runs a synchronous setup-owned callback with action semantics from an `onSetup(...)` context. */
-  // oxlint-disable-next-line no-unused-vars
   act(fn: (this: typeof this) => void) {
-    throw new Error("Cannot act() from outside an onSetup() context.");
+    const instance = getActionInstance(this);
+    if (activeSetupInstance !== instance) {
+      throw new Error("Cannot act() from outside an onSetup() context.");
+    }
+    if (activeActionInstance === instance) {
+      throw new Error("Cannot act() from inside an action.");
+    }
+    beginActionContext(instance);
+    try {
+      const result = action(fn).call(instance as this);
+      if (isPromiseLike(result)) {
+        throw new Error("[preact-sigma] act() callbacks must be synchronous");
+      }
+      commitDraft(instance);
+    } catch (error) {
+      clearActiveAction();
+      throw error;
+    }
+    endActionContext(instance);
   }
 }
 
@@ -482,10 +585,8 @@ export class SigmaTarget<
     ...[detail]: EventParameters<TEvents[TEvent]>
   ) {
     const instance = getActionInstance(this);
-    if (instance === this) {
-      throw new Error("Cannot emit() from outside an action.");
-    }
-    if (instance === activeInstance && activeDraft) {
+    assertActionContext(instance, "Cannot emit() from outside an action.");
+    if (instance === activeDraftInstance && activeDraft) {
       throw new Error("Cannot emit() until you commit() your draft.");
     }
     this[listenersSymbol].emit(name, detail);
@@ -588,8 +689,12 @@ export const sigma = /* @__PURE__ */ Object.freeze({
 
     const instance = getActionInstance(target);
     const baseState = createSnapshot(instance);
-    const patches = hasPatchListeners(instance) ? [] : undefined;
-    const inversePatches = patches ? [] : undefined;
+    if (!hasStateChanges(baseState, nextState)) {
+      return;
+    }
+    const { inversePatches, patches } = hasPatchListeners(instance)
+      ? createReplacementPatches(baseState, nextState)
+      : { inversePatches: undefined, patches: undefined };
 
     publishState(instance, nextState, baseState, patches, inversePatches);
   },
