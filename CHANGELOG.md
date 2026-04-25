@@ -16,7 +16,12 @@ All notable changes to this project will be documented in this file.
 
 - **Class model runtime:** `Sigma`, `SigmaTarget`, actions, computed getters, and `@query` support the v6 class API.
 - **Default-state helper:** `mergeDefaults(...)` applies constructor overrides over default state.
+- **Private class fields:** Class models support ECMAScript `#fields` for ephemeral instance storage that is not signal-backed, captured, or persisted by sigma.
 - **Readonly consumer helpers:** `Protected<T>` and `castProtected(...)` expose the public readonly view used by `useSigma(...)`.
+
+### Internal Improvements
+
+- **Draft diagnostics:** External-action draft errors include the active draft owner class name.
 
 ## v5.0.0
 

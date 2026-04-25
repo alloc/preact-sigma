@@ -473,7 +473,8 @@ function defineSignalProperty(instance: Sigma<any>, key: string, value: any) {
  * Base class for signal-backed state models.
  *
  * `TState` is the source of typing for top-level state keys, subscriptions, signals, and replacement snapshots.
- * Private class fields stay ordinary instance storage and are not signal-backed, captured, or persisted.
+ * Private class fields stay ordinary instance storage and are not signal-backed, captured,
+ * persisted, or used for reactive invalidation by themselves.
  * Merge a same-named interface with the class when direct property reads should be typed on the instance.
  */
 export abstract class Sigma<TState extends object> {
@@ -700,7 +701,11 @@ export const sigma = /* @__PURE__ */ Object.freeze({
   },
 });
 
-/** Marks a class method as a committed-state reactive read with arguments instead of an action. */
+/**
+ * Marks a class method as a committed-state reactive read with arguments instead of an action.
+ *
+ * Each call creates a reactive read at the call site. Query calls do not memoize results across invocations.
+ */
 export function query<TThis extends object, TArgs extends any[], TReturn>(
   method: (this: TThis, ...args: TArgs) => TReturn,
 ): (this: TThis, ...args: TArgs) => TReturn {
