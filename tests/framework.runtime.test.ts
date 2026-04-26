@@ -2,7 +2,15 @@ import { computed } from "@preact/signals";
 import { enablePatches } from "immer";
 import { assert, test } from "vitest";
 
-import { listen, query, setAutoFreeze, sigma, Sigma, SigmaTarget } from "preact-sigma";
+import {
+  listen,
+  mergeDefaults,
+  query,
+  setAutoFreeze,
+  sigma,
+  Sigma,
+  SigmaTarget,
+} from "preact-sigma";
 
 type Todo = {
   id: string;
@@ -96,6 +104,19 @@ class Counter extends Sigma<{ count: number }> {
 }
 
 Counter.prototype.isEven = query(Counter.prototype.isEven);
+
+test("mergeDefaults keeps defaults for omitted and undefined initial values", () => {
+  const defaults = {
+    draft: "",
+    page: 1,
+  };
+
+  assert.deepEqual(mergeDefaults(undefined, defaults), defaults);
+  assert.deepEqual(mergeDefaults({ draft: "sigma", page: undefined }, defaults), {
+    draft: "sigma",
+    page: 1,
+  });
+});
 
 test("sigma classes expose readonly state, computeds, query decorators, and actions", () => {
   const todoList = new TodoList();
@@ -225,6 +246,20 @@ test("listen unwraps sigma event payloads and supports void events", () => {
   assert.deepEqual(observed, ["added:Ship v6", "reset"]);
 });
 
+test("listen attaches and removes DOM target listeners", () => {
+  const target = new EventTarget();
+  const observed: string[] = [];
+  const stop = listen(target, "sigma-v6-ping", (event) => {
+    observed.push(event.type);
+  });
+
+  target.dispatchEvent(new Event("sigma-v6-ping"));
+  stop();
+  target.dispatchEvent(new Event("sigma-v6-ping"));
+
+  assert.deepEqual(observed, ["sigma-v6-ping"]);
+});
+
 test("direct SigmaTarget instances emit outside actions", () => {
   const target = new SigmaTarget<{ changed: number; reset: void }>();
   const observed: string[] = [];
@@ -315,6 +350,42 @@ test("setup returns a cleanup that owns resources in reverse order", () => {
 
   assert.deepEqual(observedEvents, ["ping"]);
   assert.deepEqual(cleanupOrder, ["parent", "child"]);
+});
+
+test("setup cleanup disposes function and object resources", () => {
+  const cleanupOrder: string[] = [];
+
+  class Store extends Sigma<{ ready: boolean }> {
+    declare ready: boolean;
+
+    constructor() {
+      super({ ready: true });
+    }
+
+    onSetup() {
+      return [
+        {
+          dispose() {
+            cleanupOrder.push("dispose");
+          },
+        },
+        {
+          [Symbol.dispose]() {
+            cleanupOrder.push("symbol");
+          },
+        },
+        () => {
+          cleanupOrder.push("function");
+        },
+      ];
+    }
+  }
+
+  const cleanup = new Store().setup();
+
+  cleanup();
+
+  assert.deepEqual(cleanupOrder, ["function", "symbol", "dispose"]);
 });
 
 test("setup act runs an anonymous action with normal action semantics", () => {
@@ -743,6 +814,29 @@ test("async actions can commit after await", async () => {
   assert.equal(counter.count, 1);
   assert.deepEqual(observed, [1]);
   stop();
+});
+
+test("async actions must commit drafts before resolving", async () => {
+  class BadAsyncCounter extends Counter {
+    async incrementWithoutCommit() {
+      await Promise.resolve();
+      this.count += 1;
+    }
+  }
+
+  const counter = new BadAsyncCounter();
+
+  await counter.incrementWithoutCommit().then(
+    () => {
+      assert.fail("expected action to reject");
+    },
+    (error) => {
+      assert.instanceOf(error, Error);
+      assert.match(error.message, /forgot to commit\(\) its draft before its promise resolved/);
+    },
+  );
+
+  assert.equal(counter.count, 1);
 });
 
 test("rejected async actions clear unpublished draft state", async () => {
