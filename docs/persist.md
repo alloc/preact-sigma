@@ -29,6 +29,7 @@ Use the persist module when those primitives are the right boundary, but you do 
 
 ## Core Pieces
 
+- Instance: a raw `Sigma` instance or a protected consumer view returned by `castProtected(...)` or `useSigma(...)`.
 - Store: owns `get`, `set`, and `delete` for persisted records. These names match [Keyv](https://github.com/jaredwray/keyv) and `Map`.
 - Codec: owns payload shape, versioning, and migration logic between stored data and a full committed snapshot.
 - Pick options: persist selected top-level keys without writing a custom codec.
@@ -54,6 +55,7 @@ Use the persist module when those primitives are the right boundary, but you do 
 
 ## Constraints
 
+- Persistence helpers are trusted external model owners. Restore and hydrate helpers may replace committed state even when they receive a protected consumer view.
 - `sigma.replaceState(...)` requires a plain object replacement snapshot. In supported TypeScript usage, pass the class's full `TState` shape.
 - Custom partial persistence codecs should reconstruct a full replacement snapshot before restore finishes.
 - Nested sigma-state values are stored only if the chosen codec and payload format support them explicitly.

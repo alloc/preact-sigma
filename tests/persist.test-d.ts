@@ -1,13 +1,15 @@
 import { assertType, expectTypeOf, test } from "vitest";
-import { Sigma } from "preact-sigma";
+import { castProtected, Sigma } from "preact-sigma";
 import {
   hydrate,
   hydrateSync,
+  persist,
   restore,
   restoreSync,
   type PersistCodec,
   type PersistOptions,
   type PersistRecord,
+  type PersistenceHandle,
   type RestoreResult,
   type SyncPersistOptions,
   type SyncPersistStore,
@@ -32,6 +34,7 @@ class Search extends Sigma<SearchState> {
 
 test("persist helpers infer state and store types", () => {
   const search = new Search();
+  const protectedSearch = castProtected(search);
 
   const syncStore: SyncPersistStore<SearchState> = {
     get() {
@@ -56,6 +59,10 @@ test("persist helpers infer state and store types", () => {
 
   assertType<RestoreResult>(restoreSync(search, fullOptions));
   assertType<Promise<RestoreResult>>(restore(search, { key: "search", store: asyncStore }));
+  assertType<RestoreResult>(restoreSync(protectedSearch, fullOptions));
+  assertType<Promise<RestoreResult>>(
+    restore(protectedSearch, { key: "search", store: asyncStore }),
+  );
 
   const partialCodec = {
     version: 1,
@@ -95,6 +102,15 @@ test("persist helpers infer state and store types", () => {
   };
 
   assertType<Promise<RestoreResult>>(restore(search, partialOptions));
+  assertType<Promise<RestoreResult>>(restore(protectedSearch, partialOptions));
+  assertType<PersistenceHandle>(persist(protectedSearch, fullOptions));
+  assertType<PersistenceHandle>(
+    persist(protectedSearch, {
+      key: "search",
+      pick: ["draft"],
+      store: pickedStore,
+    }),
+  );
   assertType<RestoreResult>(hydrateSync(search, fullOptions).restored);
   assertType<Promise<RestoreResult>>(hydrate(search, { key: "search", store: asyncStore }).restored);
   assertType<RestoreResult>(
@@ -104,12 +120,29 @@ test("persist helpers infer state and store types", () => {
       store: pickedStore,
     }).restored,
   );
+  assertType<RestoreResult>(
+    hydrateSync(protectedSearch, {
+      key: "search",
+      pick: ["draft"],
+      store: pickedStore,
+    }).restored,
+  );
+  assertType<Promise<RestoreResult>>(
+    hydrate(protectedSearch, { key: "search", store: asyncStore }).restored,
+  );
 
   // @ts-expect-error restoreSync requires a synchronous store
   restoreSync(search, { key: "search", store: asyncStore });
 
   // @ts-expect-error pick keys must exist on the sigma state
   hydrateSync(search, {
+    key: "search",
+    pick: ["missing"],
+    store: pickedStore,
+  });
+
+  // @ts-expect-error pick keys must exist on the protected sigma state
+  hydrateSync(protectedSearch, {
     key: "search",
     pick: ["missing"],
     store: pickedStore,
