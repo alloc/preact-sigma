@@ -112,7 +112,9 @@ test("persist helpers infer state and store types", () => {
     }),
   );
   assertType<RestoreResult>(hydrateSync(search, fullOptions).restored);
-  assertType<Promise<RestoreResult>>(hydrate(search, { key: "search", store: asyncStore }).restored);
+  assertType<Promise<RestoreResult>>(
+    hydrate(search, { key: "search", store: asyncStore }).restored,
+  );
   assertType<RestoreResult>(
     hydrateSync(search, {
       key: "search",

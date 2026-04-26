@@ -96,7 +96,9 @@ function createExternalActionError() {
   const instance = activeDraftInstance ?? activeActionInstance;
   const constructorName = instance?.constructor.name;
   const owner = constructorName ? `Draft for ${constructorName}` : "Draft";
-  return new Error(`[preact-sigma] ${owner} was not committed before an external action was invoked.`);
+  return new Error(
+    `[preact-sigma] ${owner} was not committed before an external action was invoked.`,
+  );
 }
 
 function beginActionContext(instance: Sigma<any>) {
