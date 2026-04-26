@@ -112,6 +112,17 @@ test("sigma classes expose typed public state, computeds, queries, and actions",
     }>
   >(todoList);
 
+  const protectedTodoList = castProtected(todoList);
+  assertType<string>(protectedTodoList.draft);
+  assertType<readonly Todo[]>(protectedTodoList.todos);
+  assertType<void>(protectedTodoList.clear());
+  // @ts-expect-error Protected state is readonly
+  protectedTodoList.draft = "draft";
+  // @ts-expect-error Protected views do not expose action-only commit boundaries
+  protectedTodoList.commit();
+  // @ts-expect-error Protected views do not expose emit
+  protectedTodoList.emit("reset");
+
   const createRefCache = (): SigmaRef<{
     count: number;
     nested: {

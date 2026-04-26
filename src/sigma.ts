@@ -748,7 +748,7 @@ export type Protected<T extends Sigma<any>> = BrandProtected<
   T extends { [typeSymbol]: { state: infer TState extends object } }
     ? {
         // Mapping over `keyof T` preserves TypeScript definition links for protected members.
-        [K in keyof T as K extends ProtectedKey ? never : K]: K extends typeof typeSymbol
+        readonly [K in keyof T as K extends ProtectedKey ? never : K]: K extends typeof typeSymbol
           ? T[K]
           : K extends keyof TState
             ? // Reactive state
