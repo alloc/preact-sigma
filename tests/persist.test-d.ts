@@ -131,6 +131,14 @@ test("persist helpers infer state and store types", () => {
     hydrate(protectedSearch, { key: "search", store: asyncStore }).restored,
   );
 
+  // @ts-expect-error pick persistence and custom codecs are mutually exclusive
+  hydrateSync(search, {
+    codec: partialCodec,
+    key: "search",
+    pick: ["draft"],
+    store: pickedStore,
+  });
+
   // @ts-expect-error restoreSync requires a synchronous store
   restoreSync(search, { key: "search", store: asyncStore });
 
