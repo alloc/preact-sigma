@@ -56,7 +56,7 @@ Use the persist module when those primitives are the right boundary, but you do 
 ## Constraints
 
 - Persistence helpers are trusted external model owners. Restore and hydrate helpers may replace committed state even when they receive a protected consumer view.
-- `sigma.replaceState(...)` requires a plain object replacement snapshot. In supported TypeScript usage, pass the class's full `TState` shape.
+- `sigma.replaceState(...)` requires a plain object replacement snapshot. In supported TypeScript usage, pass the class's full `TState` or `Immutable<TState>` shape.
 - Custom partial persistence codecs should reconstruct a full replacement snapshot before restore finishes.
 - Nested sigma-state values are stored only if the chosen codec and payload format support them explicitly.
 - Async restore failures reject through `restore(...)` or the `restored` promise from `hydrate(...)`.

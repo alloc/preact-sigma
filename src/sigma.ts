@@ -690,8 +690,11 @@ export const sigma = /* @__PURE__ */ Object.freeze({
     return Object.freeze(createSnapshot(instance)) as any;
   },
 
-  /** Publishes a plain-object snapshot as the current committed state. */
-  replaceState<TState extends object>(target: Sigma<TState>, nextState: TState) {
+  /** Publishes a plain-object snapshot, including readonly captured snapshots, as committed state. */
+  replaceState<TState extends object>(
+    target: Sigma<TState>,
+    nextState: TState | immer.Immutable<TState>,
+  ) {
     if (!isPlainObject(nextState)) {
       throw new Error("[preact-sigma] replaceState() requires a plain object snapshot");
     }
@@ -703,14 +706,15 @@ export const sigma = /* @__PURE__ */ Object.freeze({
 
     const instance = getActionInstance(target);
     const baseState = createSnapshot(instance);
-    if (!hasStateChanges(baseState, nextState)) {
+    const replacement = nextState as Record<string, unknown>;
+    if (!hasStateChanges(baseState, replacement)) {
       return;
     }
     const { inversePatches, patches } = hasPatchListeners(instance)
-      ? createReplacementPatches(baseState, nextState)
+      ? createReplacementPatches(baseState, replacement)
       : { inversePatches: undefined, patches: undefined };
 
-    publishState(instance, nextState, baseState, patches, inversePatches);
+    publishState(instance, replacement, baseState, patches, inversePatches);
   },
 });
 

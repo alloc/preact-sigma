@@ -12,6 +12,7 @@ import {
   useListener,
   type SigmaRef,
   type SigmaState,
+  type Immutable,
 } from "preact-sigma";
 
 // @ts-expect-error shouldSetup is internal-only
@@ -31,12 +32,14 @@ test("sigma classes expose typed public state, computeds, queries, and actions",
     reset: void;
   };
 
+  type TodoState = {
+    draft: string;
+    todos: Todo[];
+  };
+
   class TodoList extends SigmaTarget<
     TodoEvents,
-    {
-      draft: string;
-      todos: Todo[];
-    }
+    TodoState
   > {
     declare draft: string;
     declare todos: Todo[];
@@ -91,6 +94,11 @@ test("sigma classes expose typed public state, computeds, queries, and actions",
     }),
   );
   assertType<void>(sigma.replaceState(todoList, sigma.captureState(todoList)));
+  const immutableTodoState: Immutable<TodoState> = {
+    draft: "ready",
+    todos: [],
+  };
+  assertType<void>(sigma.replaceState<TodoState>(todoList, immutableTodoState));
   sigma.replaceState(todoList, {
     draft: "ready",
     todos: [],
