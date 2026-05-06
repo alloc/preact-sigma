@@ -98,6 +98,20 @@ test("sigma classes expose typed public state, computeds, queries, and actions",
     draft: "ready",
     todos: [],
   };
+
+  class ImmutableTodoList extends Sigma<TodoState> {
+    declare draft: string;
+    declare todos: Todo[];
+
+    constructor(initialState: Immutable<TodoState>) {
+      super(initialState);
+    }
+  }
+
+  assertType<string>(new ImmutableTodoList(immutableTodoState).draft);
+  assertType<SigmaTarget<TodoEvents, TodoState>>(
+    new SigmaTarget<TodoEvents, TodoState>(immutableTodoState),
+  );
   assertType<void>(sigma.replaceState<TodoState>(todoList, immutableTodoState));
   sigma.replaceState(todoList, {
     draft: "ready",

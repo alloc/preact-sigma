@@ -475,6 +475,7 @@ function defineSignalProperty(instance: Sigma<any>, key: string, value: any) {
  * Base class for signal-backed state models.
  *
  * `TState` is the source of typing for top-level state keys, subscriptions, signals, and replacement snapshots.
+ * The initial state passed to `super(...)` can use either the mutable `TState` shape or an immutable snapshot.
  * Private class fields stay ordinary instance storage and are not signal-backed, captured,
  * persisted, or used for reactive invalidation by themselves.
  * Merge a same-named interface with the class when direct property reads should be typed on the instance.
@@ -487,13 +488,14 @@ export abstract class Sigma<TState extends object> {
     return this;
   }
 
-  constructor(initialState: TState) {
+  constructor(initialState: TState | immer.Immutable<TState>) {
     initializeType(this.constructor);
     if (initialState === emptySentinel) {
       return; // SigmaTarget without any state
     }
-    for (const key in initialState) {
-      const initialValue = initialState[key];
+    const state = initialState as Record<string, unknown>;
+    for (const key in state) {
+      const initialValue = state[key];
       if (autoFreezeEnabled) {
         immer.freeze(initialValue, true);
       }
@@ -578,7 +580,7 @@ export class SigmaTarget<
   declare [typeSymbol]: { state: TState; events: TEvents };
   protected [listenersSymbol] = new SigmaListenerMap();
 
-  constructor(state?: TState) {
+  constructor(state?: TState | immer.Immutable<TState>) {
     super(state ?? emptySentinel);
   }
 
