@@ -137,6 +137,8 @@ test("sigma classes expose typed public state, computeds, queries, and actions",
   const protectedTodoList = castProtected(todoList);
   assertType<string>(protectedTodoList.draft);
   assertType<readonly Todo[]>(protectedTodoList.todos);
+  assertType<string>(sigma.captureState(protectedTodoList).draft);
+  assertType<readonly Todo[]>(sigma.captureState(protectedTodoList).todos);
   assertType<void>(protectedTodoList.clear());
   // @ts-expect-error Protected state is readonly
   protectedTodoList.draft = "draft";

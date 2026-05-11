@@ -1,19 +1,12 @@
 import type { Immutable } from "./immer.js";
 import { isPlainObject } from "./internal/utils.js";
-import { sigma, type Protected, type Sigma } from "./sigma.js";
+import { sigma, type ReadableSigma, type Sigma } from "./sigma.js";
 
 type MaybePromise<T> = T | Promise<T>;
 
 type MutableObject<T extends object> = {
   -readonly [K in keyof T]: T[K];
 };
-
-/**
- * Sigma instance or protected consumer view accepted by persistence helpers.
- *
- * Restore and hydrate helpers may replace committed state through this trusted owner boundary.
- */
-type PersistInstance<TState extends object> = Sigma<TState> | Protected<Sigma<TState>>;
 
 /** Decode-time context passed to persistence codecs. */
 export interface PersistDecodeContext<TState extends object> {
@@ -210,7 +203,7 @@ function getCodec<TState extends object, TStored>(
 }
 
 function applyRecord<TState extends object, TStored>(
-  instance: PersistInstance<TState>,
+  instance: ReadableSigma<TState>,
   key: string,
   record: PersistRecord<TStored> | undefined,
   codec: PersistCodec<TState, TStored>,
@@ -237,15 +230,15 @@ function applyRecord<TState extends object, TStored>(
 
 /** Restores committed state from a persisted record through an async store. */
 export async function restore<TState extends object, TKey extends keyof TState>(
-  instance: PersistInstance<TState>,
+  instance: ReadableSigma<TState>,
   options: PickPersistOptions<TState, TKey>,
 ): Promise<RestoreResult>;
 export async function restore<TState extends object, TStored = Immutable<TState>>(
-  instance: PersistInstance<TState>,
+  instance: ReadableSigma<TState>,
   options: PersistOptions<TState, TStored>,
 ): Promise<RestoreResult>;
 export async function restore<TState extends object, TStored = Immutable<TState>>(
-  instance: PersistInstance<TState>,
+  instance: ReadableSigma<TState>,
   options: AnyPersistOptions<TState, TStored>,
 ): Promise<RestoreResult> {
   const codec = getCodec(options);
@@ -255,15 +248,15 @@ export async function restore<TState extends object, TStored = Immutable<TState>
 
 /** Restores committed state from a persisted record through a sync store. */
 export function restoreSync<TState extends object, TKey extends keyof TState>(
-  instance: PersistInstance<TState>,
+  instance: ReadableSigma<TState>,
   options: SyncPickPersistOptions<TState, TKey>,
 ): RestoreResult;
 export function restoreSync<TState extends object, TStored = Immutable<TState>>(
-  instance: PersistInstance<TState>,
+  instance: ReadableSigma<TState>,
   options: SyncPersistOptions<TState, TStored>,
 ): RestoreResult;
 export function restoreSync<TState extends object, TStored = Immutable<TState>>(
-  instance: PersistInstance<TState>,
+  instance: ReadableSigma<TState>,
   options: AnySyncPersistOptions<TState, TStored>,
 ): RestoreResult {
   const codec = getCodec(options);
@@ -273,15 +266,15 @@ export function restoreSync<TState extends object, TStored = Immutable<TState>>(
 
 /** Persists future committed state changes for one sigma instance. */
 export function persist<TState extends object, TKey extends keyof TState>(
-  instance: PersistInstance<TState>,
+  instance: ReadableSigma<TState>,
   options: PickPersistOptions<TState, TKey>,
 ): PersistenceHandle;
 export function persist<TState extends object, TStored = Immutable<TState>>(
-  instance: PersistInstance<TState>,
+  instance: ReadableSigma<TState>,
   options: PersistOptions<TState, TStored>,
 ): PersistenceHandle;
 export function persist<TState extends object, TStored = Immutable<TState>>(
-  instance: PersistInstance<TState>,
+  instance: ReadableSigma<TState>,
   options: AnyPersistOptions<TState, TStored>,
 ): PersistenceHandle {
   const codec = getCodec(options);
@@ -445,15 +438,15 @@ export function persist<TState extends object, TStored = Immutable<TState>>(
 
 /** Restores state, then begins persisting future committed changes. */
 export function hydrate<TState extends object, TKey extends keyof TState>(
-  instance: PersistInstance<TState>,
+  instance: ReadableSigma<TState>,
   options: PickPersistOptions<TState, TKey>,
 ): HydrationHandle;
 export function hydrate<TState extends object, TStored = Immutable<TState>>(
-  instance: PersistInstance<TState>,
+  instance: ReadableSigma<TState>,
   options: PersistOptions<TState, TStored>,
 ): HydrationHandle;
 export function hydrate<TState extends object, TStored = Immutable<TState>>(
-  instance: PersistInstance<TState>,
+  instance: ReadableSigma<TState>,
   options: AnyPersistOptions<TState, TStored>,
 ): HydrationHandle {
   let stopped = false;
@@ -511,15 +504,15 @@ export function hydrate<TState extends object, TStored = Immutable<TState>>(
 
 /** Restores state synchronously, then begins persisting future committed changes. */
 export function hydrateSync<TState extends object, TKey extends keyof TState>(
-  instance: PersistInstance<TState>,
+  instance: ReadableSigma<TState>,
   options: SyncPickPersistOptions<TState, TKey>,
 ): SyncHydrationHandle;
 export function hydrateSync<TState extends object, TStored = Immutable<TState>>(
-  instance: PersistInstance<TState>,
+  instance: ReadableSigma<TState>,
   options: SyncPersistOptions<TState, TStored>,
 ): SyncHydrationHandle;
 export function hydrateSync<TState extends object, TStored = Immutable<TState>>(
-  instance: PersistInstance<TState>,
+  instance: ReadableSigma<TState>,
   options: AnySyncPersistOptions<TState, TStored>,
 ): SyncHydrationHandle {
   const restored = restoreSync(instance, options as SyncPersistOptions<TState, TStored>);

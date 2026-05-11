@@ -47,6 +47,8 @@ export type SigmaRef<T extends object = {}> = T & {
   [refSymbol]?: true;
 };
 
+export type ReadableSigma<TState extends object> = Sigma<TState> | Protected<Sigma<TState>>;
+
 /** Definition shape used by helper types that need both state and event maps. */
 export type SigmaDefinition = {
   state: object;
@@ -144,16 +146,18 @@ function getStateSignal(instance: Sigma<any>, key: string) {
   return (instance as any)[key + signalSuffix] as Signal<any> | undefined;
 }
 
-function createSnapshot(instance: Sigma<any>) {
-  if (instance[snapshotSymbol]) {
-    return instance[snapshotSymbol];
+function createSnapshot(instance: ReadableSigma<any>) {
+  const source = instance as Sigma<any>;
+  if (source[snapshotSymbol]) {
+    return source[snapshotSymbol];
   }
   const state: Record<string, unknown> = {};
-  for (const key in instance) {
-    if (isStateKey(instance, key)) {
-      state[key] = getStateSignal(instance, key)!.value;
+  for (const key in source) {
+    if (isStateKey(source, key)) {
+      state[key] = getStateSignal(source, key)!.value;
     }
   }
+  source[snapshotSymbol] = state;
   return state;
 }
 
@@ -688,7 +692,7 @@ export const sigma = /* @__PURE__ */ Object.freeze({
   },
 
   /** Captures the current committed top-level state snapshot. */
-  captureState<TState extends object>(instance: Sigma<TState>): immer.Immutable<TState> {
+  captureState<TState extends object>(instance: ReadableSigma<TState>): immer.Immutable<TState> {
     return Object.freeze(createSnapshot(instance)) as any;
   },
 
