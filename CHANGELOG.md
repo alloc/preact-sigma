@@ -2,7 +2,60 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v6.2.0
+
+### Added
+
+- **`useSigmaSync` hook:** Synchronizes changed external data into a sigma instance after the initial render. Accepts a plain object with stable keys, shallow-compares values with `Object.is(...)`, and runs the sync callback only when at least one value changes.
+
+## v6.1.4
+
+### Fixed
+
+- **`captureState(...)` accepts protected views:** `sigma.captureState(...)` now accepts a `Protected<Sigma<TState>>` in addition to the owner instance.
+
+## v6.1.3
+
+### Fixed
+
+- **Immutable initial state:** Sigma constructors now accept a `Readonly<TState>` or `DeepReadonly<TState>` value as the initial state argument.
+
+## v6.1.2
+
+### Fixed
+
+- **Immutable `replaceState(...)` snapshots:** `sigma.replaceState(...)` now accepts readonly snapshot objects.
+
+## v6.1.1
+
+### Fixed
+
+- **Protected views are readonly:** `Protected<T>` now enforces deep readonly on all state properties.
+- **Persist helpers accept protected views:** `restoreState(...)`, `persistState(...)`, and related helpers now accept a `Protected<>` view in addition to the owner instance.
+
+## v6.1.0
+
+### Added
+
+- **Standalone sigma targets:** Directly constructed `SigmaTarget<TEvents>` instances can emit typed events from ordinary code.
+
+## v6.0.2
+
+### Internal Improvements
+
+- **Documentation:** Clarified sigma runtime semantics and private-field behavior in reference docs.
+
+## v6.0.1
+
+### Added
+
+- **Private class fields:** Class models support ECMAScript `#fields` for ephemeral instance storage that is not signal-backed, captured, or persisted by sigma.
+
+### Internal Improvements
+
+- **Draft diagnostics:** External-action draft errors include the active draft owner class name.
+
+## v6.0.0
 
 ### Breaking Changes
 
@@ -16,13 +69,7 @@ All notable changes to this project will be documented in this file.
 
 - **Class model runtime:** `Sigma`, `SigmaTarget`, actions, computed getters, and `@query` support the v6 class API.
 - **Default-state helper:** `mergeDefaults(...)` applies constructor overrides over default state.
-- **Private class fields:** Class models support ECMAScript `#fields` for ephemeral instance storage that is not signal-backed, captured, or persisted by sigma.
 - **Readonly consumer helpers:** `Protected<T>` and `castProtected(...)` expose the public readonly view used by `useSigma(...)`.
-- **Standalone sigma targets:** Directly constructed `SigmaTarget<TEvents>` instances can emit typed events from ordinary code.
-
-### Internal Improvements
-
-- **Draft diagnostics:** External-action draft errors include the active draft owner class name.
 
 ## v5.0.0
 
