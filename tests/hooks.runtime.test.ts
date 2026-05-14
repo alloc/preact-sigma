@@ -4,7 +4,14 @@ import { render, type FunctionComponent, h } from "preact";
 import { act } from "preact/test-utils";
 import { afterEach, assert, test } from "vitest";
 
-import { Sigma, SigmaTarget, useListener, useSigma, type Protected } from "preact-sigma";
+import {
+  Sigma,
+  SigmaTarget,
+  useListener,
+  useSigma,
+  useSigmaSync,
+  type Protected,
+} from "preact-sigma";
 
 function createContainer() {
   const container = document.createElement("div");
@@ -164,4 +171,119 @@ test("useListener subscribes to sigma targets", async () => {
   target.ping(3);
 
   assert.deepEqual(observed, ["a:1", "b:2"]);
+});
+
+test("useSigmaSync skips initial render and syncs shallow input changes", async () => {
+  const container = createContainer();
+  const synced: Array<{ users: readonly string[]; teams: readonly string[] }> = [];
+  const usersA = ["ada"];
+  const usersB = ["ada", "grace"];
+  const teamsA = ["core"];
+  let state!: Protected<QueryState>;
+
+  class QueryState extends Sigma<{ count: number }> {
+    declare count: number;
+
+    constructor() {
+      super({ count: 0 });
+    }
+
+    syncQueryData(users: readonly string[], teams: readonly string[]) {
+      synced.push({ users, teams });
+      this.count += 1;
+    }
+  }
+
+  const Probe: FunctionComponent<{
+    users: readonly string[];
+    teams: readonly string[];
+  }> = ({ users, teams }) => {
+    state = useSigma(() => new QueryState());
+    useSigmaSync(state, { users, teams }, ({ users, teams }) => {
+      state.syncQueryData(users, teams);
+    });
+    return null;
+  };
+
+  await act(() => render(h(Probe, { users: usersA, teams: teamsA }), container));
+  assert.equal(state.count, 0);
+  assert.deepEqual(synced, []);
+
+  await act(() => render(h(Probe, { users: usersA, teams: teamsA }), container));
+  assert.equal(state.count, 0);
+
+  await act(() => render(h(Probe, { users: usersB, teams: teamsA }), container));
+  assert.equal(state.count, 1);
+  assert.deepEqual(synced, [{ users: usersB, teams: teamsA }]);
+});
+
+test("useSigmaSync treats a recreated instance as a fresh initial render", async () => {
+  const container = createContainer();
+  const synced: string[] = [];
+  let state!: Protected<QueryState>;
+
+  class QueryState extends Sigma<{ value: string }> {
+    declare value: string;
+
+    constructor(value: string) {
+      super({ value });
+    }
+
+    syncValue(value: string) {
+      synced.push(value);
+      this.value = value;
+    }
+  }
+
+  const Probe: FunctionComponent<{ id: string; value: string }> = ({ id, value }) => {
+    state = useSigma(() => new QueryState(value), [id]);
+    useSigmaSync(state, { value }, ({ value }) => {
+      state.syncValue(value);
+    });
+    return null;
+  };
+
+  await act(() => render(h(Probe, { id: "a", value: "one" }), container));
+  assert.equal(state.value, "one");
+
+  await act(() => render(h(Probe, { id: "a", value: "two" }), container));
+  assert.equal(state.value, "two");
+  assert.deepEqual(synced, ["two"]);
+
+  await act(() => render(h(Probe, { id: "b", value: "three" }), container));
+  assert.equal(state.value, "three");
+  assert.deepEqual(synced, ["two"]);
+});
+
+test("useSigmaSync requires plain object input with stable keys", async () => {
+  const container = createContainer();
+
+  class QueryState extends Sigma<{ count: number }> {
+    declare count: number;
+
+    constructor() {
+      super({ count: 0 });
+    }
+  }
+
+  const state = new QueryState();
+
+  const InvalidInput: FunctionComponent = () => {
+    useSigmaSync(state, [] as any, () => {});
+    return null;
+  };
+
+  assert.throws(() => {
+    render(h(InvalidInput, {}), container);
+  }, /plain object/);
+
+  const ChangingKeys: FunctionComponent<{ mode: "one" | "two" }> = ({ mode }) => {
+    useSigmaSync(state, mode === "one" ? { value: 1 } : { value: 2, extra: true }, () => {});
+    return null;
+  };
+
+  await act(() => render(h(ChangingKeys, { mode: "one" }), container));
+  assert.throws(() => {
+    act(() => render(h(ChangingKeys, { mode: "two" }), container));
+  }, /stable/);
 });

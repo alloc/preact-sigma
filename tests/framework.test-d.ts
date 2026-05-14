@@ -10,6 +10,7 @@ import {
   Sigma,
   SigmaTarget,
   useListener,
+  useSigmaSync,
   type SigmaRef,
   type SigmaState,
   type Immutable,
@@ -37,10 +38,7 @@ test("sigma classes expose typed public state, computeds, queries, and actions",
     todos: Todo[];
   };
 
-  class TodoList extends SigmaTarget<
-    TodoEvents,
-    TodoState
-  > {
+  class TodoList extends SigmaTarget<TodoEvents, TodoState> {
     declare draft: string;
     declare todos: Todo[];
 
@@ -260,6 +258,33 @@ test("SigmaTarget infers typed events for listen and useListener", () => {
   });
   // @ts-expect-error Void events do not accept payloads
   hub.emit("closed", {});
+});
+
+test("useSigmaSync accepts protected sigma instances and readonly plain object input", () => {
+  class Search extends Sigma<{ query: string }> {
+    declare query: string;
+
+    constructor() {
+      super({ query: "" });
+    }
+
+    syncQueryData(data: readonly string[]) {
+      this.query = data.join(",");
+    }
+  }
+
+  const search = castProtected(new Search());
+
+  function Probe(data: readonly string[]) {
+    useSigmaSync(search, { data }, ({ data }) => {
+      assertType<readonly string[]>(data);
+      search.syncQueryData(data);
+      // @ts-expect-error sync input is readonly
+      data.push("next");
+    });
+  }
+
+  void Probe;
 });
 
 test("setup act is typed on setup contexts", () => {
