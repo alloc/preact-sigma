@@ -19,6 +19,10 @@ function hasChanged(previous: PlainObject, next: PlainObject, keys: readonly str
  *
  * `input` must be a plain object with stable keys. Its values are shallow-compared with
  * `Object.is(...)`, and `sync(...)` runs only after at least one value changes.
+ *
+ * A changed `instance` resets the baseline input, so newly created component-owned sigma
+ * instances can receive their initial external data through construction or setup before
+ * later renders synchronize changes through this hook.
  */
 export function useSigmaSync<TInstance extends Sigma<any>, TInput extends PlainObject>(
   instance: TInstance | Protected<TInstance>,

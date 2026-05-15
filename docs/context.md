@@ -55,6 +55,7 @@
 - Read one top-level state property as a `ReadonlySignal`: `sigma.getSignal(instance, key)`.
 - Own timers, listeners, subscriptions, or nested setup: `onSetup(...)` plus `setup(...)`.
 - Use a sigma instance inside a component: `useSigma(...)`.
+- Synchronize changed component data into a sigma instance after the initial render: `useSigmaSync(instance, input, sync)`.
 - Cast an instance to its readonly consumer view outside a component: `castProtected(instance)`.
 - Subscribe to sigma or DOM events in a component: `useListener(...)`.
 - Subscribe outside components: `listen(instance, ...)`.
@@ -72,6 +73,7 @@
 - Emit directly from standalone `SigmaTarget` instances. In subclasses, emit from actions that have no unpublished draft changes. After mutating state, publish first with `this.commit(); this.emit(...)`.
 - Prefer `listen(...)` for external event subscriptions. It works with sigma targets and DOM targets.
 - Put owned side effects in `onSetup(...)`.
+- Use `useSigmaSync(...)` when a component-owned sigma instance is initialized from external props or hook data and needs to receive later changes through an action. Pass a plain object with stable keys; values are compared with `Object.is(...)`, and a recreated instance treats the current input as its new baseline.
 - Use `sigma.subscribe(this, ...)` inside `onSetup(...)` when a setup-owned side effect should react to future committed publishes. Return that cleanup so the subscription stops with setup.
   ```ts
   onSetup() {
@@ -115,6 +117,7 @@
 - Calling `emit(...)` outside an action on a subclass, or before committing the active draft, throws.
 - Calling an action from a computed or query throws.
 - Returning an active draft from an action throws.
+- `useSigmaSync(...)` throws when its input is not a plain object or when the input keys change between renders for the same instance.
 - `sigma.replaceState(...)` throws when the replacement value is not a plain object or when an action still owns unpublished changes.
 - Starting an action on another sigma instance while the current instance has an active action context throws.
 
