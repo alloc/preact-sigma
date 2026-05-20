@@ -137,6 +137,17 @@ test("sigma classes expose typed public state, computeds, queries, and actions",
   assertType<readonly Todo[]>(protectedTodoList.todos);
   assertType<string>(sigma.captureState(protectedTodoList).draft);
   assertType<readonly Todo[]>(sigma.captureState(protectedTodoList).todos);
+  assertType<() => void>(
+    sigma.subscribe(protectedTodoList, function (nextState, baseState) {
+      assertType<string>(nextState.draft);
+      assertType<readonly Todo[]>(baseState.todos);
+    }),
+  );
+  assertType<() => void>(
+    sigma.subscribe(protectedTodoList, "draft", (draft) => {
+      assertType<string>(draft);
+    }),
+  );
   assertType<void>(protectedTodoList.clear());
   // @ts-expect-error Protected state is readonly
   protectedTodoList.draft = "draft";
@@ -185,7 +196,7 @@ test("sigma classes expose typed public state, computeds, queries, and actions",
   })();
 
   sigma.subscribe(
-    observedCount,
+    castProtected(observedCount),
     function (_nextState, _baseState, patches, inversePatches) {
       assertType<readonly Patch[]>(patches);
       assertType<readonly Patch[]>(inversePatches);

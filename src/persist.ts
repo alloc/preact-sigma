@@ -386,7 +386,7 @@ export function persist<TState extends object, TStored = Immutable<TState>>(
     }
   }
 
-  const stopSubscription = sigma.subscribe(instance as Sigma<TState>, queueStateWrite);
+  const stopSubscription = sigma.subscribe(instance, queueStateWrite);
 
   if (options.writeInitial) {
     queueStateWrite();

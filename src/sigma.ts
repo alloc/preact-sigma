@@ -617,12 +617,13 @@ export class SigmaTarget<
 export const sigma = /* @__PURE__ */ Object.freeze({
   /** Subscribes to committed state publishes or to one signal-backed top-level state key. */
   subscribe: ((
-    instance: Sigma<any>,
+    instance: ReadableSigma<any>,
     keyOrListener: string | AnyFunction,
     listenerOrOptions?: AnyFunction | { patches: boolean },
   ) => {
+    const source = instance as Sigma<any>;
     if (typeof keyOrListener === "string") {
-      const signal = getStateSignal(instance, keyOrListener);
+      const signal = getStateSignal(source, keyOrListener);
       if (!signal) {
         throw new Error(`[preact-sigma] Property named "${keyOrListener}" is not signal-backed.`);
       }
@@ -636,21 +637,21 @@ export const sigma = /* @__PURE__ */ Object.freeze({
       patchListeners.add(listener);
     }
 
-    let subscriptions = changeListenersMap.get(instance);
+    let subscriptions = changeListenersMap.get(source);
     if (!subscriptions) {
       subscriptions = new Set();
-      changeListenersMap.set(instance, subscriptions);
+      changeListenersMap.set(source, subscriptions);
     }
     subscriptions.add(listener);
     return () => {
       subscriptions.delete(listener);
       if (!subscriptions.size) {
-        changeListenersMap.delete(instance);
+        changeListenersMap.delete(source);
       }
     };
   }) as {
     <TState extends object>(
-      instance: Sigma<TState>,
+      instance: ReadableSigma<TState>,
       listener: (
         nextState: immer.Immutable<TState>,
         baseState: immer.Immutable<TState>,
@@ -661,7 +662,7 @@ export const sigma = /* @__PURE__ */ Object.freeze({
     ): Cleanup;
 
     <TState extends object>(
-      instance: Sigma<TState>,
+      instance: ReadableSigma<TState>,
       listener: (
         nextState: immer.Immutable<TState>,
         baseState: immer.Immutable<TState>,
@@ -672,12 +673,12 @@ export const sigma = /* @__PURE__ */ Object.freeze({
     ): Cleanup;
 
     <TState extends object>(
-      instance: Sigma<TState>,
+      instance: ReadableSigma<TState>,
       listener: (nextState: immer.Immutable<TState>, baseState: immer.Immutable<TState>) => void,
     ): Cleanup;
 
     <TState extends object, TKey extends Extract<keyof TState, string>>(
-      instance: Sigma<TState>,
+      instance: ReadableSigma<TState>,
       key: TKey,
       listener: (value: immer.Immutable<TState[TKey]>) => void,
     ): Cleanup;
