@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## v6.2.1
+
+### Fixed
+
+- **Protected subscriptions:** `sigma.subscribe(...)` now accepts protected sigma views in addition to owner instances.
+
 ## v6.2.0
 
 ### Added
