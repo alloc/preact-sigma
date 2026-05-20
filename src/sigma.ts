@@ -19,6 +19,7 @@ import {
   type AnyFunction,
   type AnyResource,
   type Cleanup,
+  disposeResources,
   isPlainObject,
   isPromiseLike,
 } from "./internal/utils.js";
@@ -448,16 +449,6 @@ function initializeType(type: Function) {
   }
 }
 
-function disposeCleanupResource(resource: AnyResource) {
-  if (typeof resource === "function") {
-    resource();
-  } else if ("dispose" in resource) {
-    resource.dispose();
-  } else {
-    resource[Symbol.dispose]();
-  }
-}
-
 function defineSignalProperty(instance: Sigma<any>, key: string, value: any) {
   Object.defineProperty(instance, key + signalSuffix, {
     value: createSignal(value),
@@ -522,9 +513,7 @@ export abstract class Sigma<TState extends object> {
       activeSetupInstance = previousSetupInstance;
     }
     return () => {
-      for (let i = resources.length - 1; i >= 0; i--) {
-        disposeCleanupResource(resources[i]);
-      }
+      disposeResources(resources);
     };
   }
 

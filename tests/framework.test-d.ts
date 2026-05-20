@@ -10,7 +10,9 @@ import {
   Sigma,
   SigmaTarget,
   useListener,
+  useSetup,
   useSigmaSync,
+  type AnyResource,
   type SigmaRef,
   type SigmaState,
   type Immutable,
@@ -269,6 +271,25 @@ test("SigmaTarget infers typed events for listen and useListener", () => {
   });
   // @ts-expect-error Void events do not accept payloads
   hub.emit("closed", {});
+});
+
+test("useSetup accepts sigma cleanup resources", () => {
+  const resource: AnyResource = {
+    dispose() {},
+  };
+
+  assertType<void>(
+    useSetup(() => [
+      () => {},
+      resource,
+      {
+        [Symbol.dispose]() {},
+      },
+    ]),
+  );
+
+  // @ts-expect-error setup callbacks must return cleanup resources
+  useSetup(() => undefined);
 });
 
 test("useSigmaSync accepts protected sigma instances and readonly plain object input", () => {

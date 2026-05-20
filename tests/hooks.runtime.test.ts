@@ -10,6 +10,7 @@ import {
   useListener,
   useSigma,
   useSigmaSync,
+  useSetup,
   type Protected,
 } from "preact-sigma";
 
@@ -171,6 +172,57 @@ test("useListener subscribes to sigma targets", async () => {
   target.ping(3);
 
   assert.deepEqual(observed, ["a:1", "b:2"]);
+});
+
+test("useSetup disposes returned resources in reverse order", async () => {
+  const container = createContainer();
+  const events: string[] = [];
+
+  const Probe: FunctionComponent<{ label: string }> = ({ label }) => {
+    useSetup(() => {
+      events.push(`setup:${label}`);
+      return [
+        () => {
+          events.push(`cleanup-fn:${label}`);
+        },
+        {
+          dispose() {
+            events.push(`cleanup-dispose:${label}`);
+          },
+        },
+        {
+          [Symbol.dispose]() {
+            events.push(`cleanup-symbol:${label}`);
+          },
+        },
+      ];
+    }, [label]);
+    return null;
+  };
+
+  await act(() => render(h(Probe, { label: "a" }), container));
+  assert.deepEqual(events, ["setup:a"]);
+
+  await act(() => render(h(Probe, { label: "b" }), container));
+  assert.deepEqual(events, [
+    "setup:a",
+    "cleanup-symbol:a",
+    "cleanup-dispose:a",
+    "cleanup-fn:a",
+    "setup:b",
+  ]);
+
+  await act(() => render(null, container));
+  assert.deepEqual(events, [
+    "setup:a",
+    "cleanup-symbol:a",
+    "cleanup-dispose:a",
+    "cleanup-fn:a",
+    "setup:b",
+    "cleanup-symbol:b",
+    "cleanup-dispose:b",
+    "cleanup-fn:b",
+  ]);
 });
 
 test("useSigmaSync skips initial render and syncs shallow input changes", async () => {

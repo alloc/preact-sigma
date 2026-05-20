@@ -56,6 +56,7 @@
 - Own timers, listeners, subscriptions, or nested setup: `onSetup(...)` plus `setup(...)`.
 - Use a sigma instance inside a component: `useSigma(...)`.
 - Synchronize changed component data into a sigma instance after the initial render: `useSigmaSync(instance, input, sync)`.
+- Own component-local setup resources: `useSetup(...)`.
 - Cast an instance to its readonly consumer view outside a component: `castProtected(instance)`.
 - Subscribe to sigma or DOM events in a component: `useListener(...)`.
 - Subscribe outside components: `listen(instance, ...)`.
@@ -73,6 +74,7 @@
 - Emit directly from standalone `SigmaTarget` instances. In subclasses, emit from actions that have no unpublished draft changes. After mutating state, publish first with `this.commit(); this.emit(...)`.
 - Prefer `listen(...)` for external event subscriptions. It works with sigma targets and DOM targets.
 - Put owned side effects in `onSetup(...)`.
+- Use `useSetup(...)` when a component owns setup resources directly. The callback returns cleanup resources, and teardown disposes them in reverse order.
 - Use `useSigmaSync(...)` when a component-owned sigma instance is initialized from external props or hook data and needs to receive later changes through an action. Pass a plain object with stable keys; values are compared with `Object.is(...)`, and a recreated instance treats the current input as its new baseline.
 - Use `sigma.subscribe(this, ...)` inside `onSetup(...)` when a setup-owned side effect should react to future committed publishes. Return that cleanup so the subscription stops with setup.
   ```ts
