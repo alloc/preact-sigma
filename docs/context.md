@@ -53,8 +53,8 @@
 - Publish unpublished changes before `await`, `emit(...)`, promise resolution, or another instance's action: `this.commit()`.
 - React to committed state changes: `sigma.subscribe(instance, handler)` or `sigma.subscribe(instance, key, handler)`.
 - Read one top-level state property as a `ReadonlySignal`: `sigma.getSignal(instance, key)`.
-- Own timers, listeners, subscriptions, or nested setup: `onSetup(...)` plus `setup(...)`.
-- Use a sigma instance inside a component: `useSigma(...)`.
+- Own model lifecycle resources: `onSetup(...)` plus `setup(...)`.
+- Use a component-owned sigma instance: `useSigma(...)`, which runs `onSetup(...)` automatically.
 - Synchronize changed component data into a sigma instance after the initial render: `useSigmaSync(instance, input, sync)`.
 - Own component-local setup resources: `useSetup(...)`.
 - Cast an instance to its readonly consumer view outside a component: `castProtected(instance)`.
@@ -73,8 +73,9 @@
 - Use ordinary actions for routine writes. Reserve `sigma.captureState(...)` and `sigma.replaceState(...)` for replay, reset, restore, or undo-like flows on committed top-level state.
 - Emit directly from standalone `SigmaTarget` instances. In subclasses, emit from actions that have no unpublished draft changes. After mutating state, publish first with `this.commit(); this.emit(...)`.
 - Prefer `listen(...)` for external event subscriptions. It works with sigma targets and DOM targets.
-- Put owned side effects in `onSetup(...)`.
+- Put model-owned side effects in `onSetup(...)`.
 - Use `useSetup(...)` when a component owns setup resources directly. The callback returns cleanup resources, and teardown disposes them in reverse order.
+- A sigma instance created with `useSigma(...)` already runs its `onSetup(...)` method. Do not call `instance.setup(...)` for that same instance from `useSetup(...)`, because that starts a second setup lifecycle.
 - Use `useSigmaSync(...)` when a component-owned sigma instance is initialized from external props or hook data and needs to receive later changes through an action. Pass a plain object with stable keys; values are compared with `Object.is(...)`, and a recreated instance treats the current input as its new baseline.
 - Use `sigma.subscribe(this, ...)` inside `onSetup(...)` when a setup-owned side effect should react to future committed publishes. Return that cleanup so the subscription stops with setup.
   ```ts
@@ -93,6 +94,7 @@
 - Reaching for `sigma.getSignal(instance, key)` when direct property reads already cover the use case.
 - Crossing `emit(...)`, `await`, promise resolution, or another instance's action with unpublished changes. Publish them first with `this.commit()`.
 - Starting side effects during construction instead of through explicit `setup(...)`.
+- Calling `setup(...)` manually for an instance created by `useSigma(...)`.
 - Encoding storage, hydration, or migration policy directly into model classes.
 - Relying on computeds or queries to observe unpublished draft changes inside actions.
 - Treating query calls as memoized across invocations.

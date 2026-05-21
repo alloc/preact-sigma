@@ -43,7 +43,8 @@ function depsChanged<T>(container: RefObject<T | null>, deps?: readonly any[]) {
 /**
  * Creates or reuses a sigma instance for a component and returns its protected consumer view.
  *
- * Classes with `onSetup(...)` run setup in an effect and clean it up on unmount.
+ * Classes with `onSetup(...)` run setup in an effect and clean it up on unmount,
+ * so the returned instance does not need a separate `useSetup(...)` call.
  */
 export function useSigma<T extends Sigma<any>>(...args: UseSigmaArgs<T>): Protected<T>;
 export function useSigma<T extends Sigma<any>>(
