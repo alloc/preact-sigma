@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## v6.3.0
+
+### Added
+
+- **`useSetup` hook:** Runs component-owned setup effects that return sigma cleanup resources, disposing them in reverse order during teardown.
+
 ## v6.2.1
 
 ### Fixed
