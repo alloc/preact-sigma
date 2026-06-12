@@ -1,6 +1,7 @@
 {
   "name": "preact-sigma",
   "version": "6.3.0",
+  "packageManager": "pnpm@11.5.1",
   "keywords": [],
   "license": "MIT",
   "author": "Alec Larson",
