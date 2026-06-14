@@ -1,9 +1,14 @@
 export type AnyFunction = (...args: any[]) => any;
 
-/** Function cleanup returned from setup-owned resources. */
+/** Cleanup function returned by setup-owned resources and run during teardown. */
 export type Cleanup = () => void;
 
-/** Cleanup resource returned from setup hooks and disposed during teardown. */
+/**
+ * Resource shape accepted from `onSetup(...)` and `useSetup(...)`.
+ *
+ * Teardown disposes resources in reverse order and accepts cleanup functions,
+ * objects with `dispose()`, and objects with `[Symbol.dispose]()`.
+ */
 export type AnyResource = Cleanup | { dispose(): void } | { [Symbol.dispose](): void };
 
 export function disposeResource(resource: AnyResource) {

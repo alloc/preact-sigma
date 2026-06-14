@@ -4,7 +4,13 @@ import { castProtected, type Protected, type Sigma } from "../sigma.js";
 
 /** Setup arguments and recreation dependencies for `useSigma(...)`. */
 export type UseSigmaOptions<TSetup extends readonly any[] = any[]> = {
-  /** Arguments passed to the sigma instance's `onSetup(...)` method. */
+  /**
+   * Arguments passed to the sigma instance's `onSetup(...)` method.
+   *
+   * Array setup arguments also drive setup cleanup and rerun. Function setup is
+   * evaluated for the current setup run, but it does not make captured render
+   * values reactive by itself; pass an array when setup inputs should rerun.
+   */
   setup: TSetup | (() => TSetup);
   /** Dependencies that recreate the sigma instance when they change. */
   deps?: readonly any[];
@@ -44,7 +50,8 @@ function depsChanged<T>(container: RefObject<T | null>, deps?: readonly any[]) {
  * Creates or reuses a sigma instance for a component and returns its protected consumer view.
  *
  * Classes with `onSetup(...)` run setup in an effect and clean it up on unmount,
- * so the returned instance does not need a separate `useSetup(...)` call.
+ * so the returned instance does not need a separate `useSetup(...)` call. Array
+ * setup arguments rerun setup when they change; `deps` recreates the instance.
  */
 export function useSigma<T extends Sigma<any>>(...args: UseSigmaArgs<T>): Protected<T>;
 export function useSigma<T extends Sigma<any>>(

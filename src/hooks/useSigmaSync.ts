@@ -5,6 +5,8 @@ import type { Protected, Sigma } from "../sigma.js";
 type PlainObject = Record<string, unknown>;
 
 function assertStableKeys(cachedKeys: readonly string[], nextKeys: readonly string[]) {
+  // This is O(n^2), but useSigmaSync input objects are expected to be small
+  // prop-like bags, so the simpler check is acceptable on this render path.
   if (cachedKeys.length !== nextKeys.length || nextKeys.some((key) => !cachedKeys.includes(key))) {
     throw new Error("[preact-sigma] useSigmaSync() input keys must stay stable between renders.");
   }
