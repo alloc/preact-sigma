@@ -35,9 +35,9 @@ export function useSigmaSync<TInstance extends Sigma<any>, TInput extends PlainO
     throw new Error("[preact-sigma] useSigmaSync() input must be a plain object.");
   }
 
-  const previousInput = useRef<TInput>(undefined);
-  const previousKeys = useRef<string[]>(undefined);
-  const previousInstance = useRef<typeof instance>(undefined);
+  const previousInput = useRef<TInput | undefined>(undefined);
+  const previousKeys = useRef<string[] | undefined>(undefined);
+  const previousInstance = useRef<typeof instance | undefined>(undefined);
 
   useEffect(() => {
     const nextKeys = Object.keys(input);
