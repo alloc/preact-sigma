@@ -61,6 +61,9 @@ export type SigmaState<T extends SigmaDefinition> = Sigma<T["state"]> & {
   [typeSymbol]: T;
 };
 
+// Sigma permits only one unpublished draft anywhere in the program at a time.
+// Async action bookkeeping can track multiple pending actions, but draft reads
+// and writes still flow through this single active draft slot.
 let activeActionInstance: Sigma<any> | null = null;
 let activeDraftInstance: Sigma<any> | null = null;
 let activeDraft: any;
